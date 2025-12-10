@@ -4,7 +4,8 @@ import {
   X, Check, LogIn, LogOut, Bell, Send, User, Moon, Building2, 
   Stethoscope, Star, FileSpreadsheet, Printer, Settings, Home,
   CalendarOff, MessageSquare, Shield, ChevronLeft, ChevronRight,
-  Copy, ExternalLink, Clock, AlertCircle, Plus, Trash2, PlusCircle
+  Copy, ExternalLink, Clock, AlertCircle, Plus, Trash2, PlusCircle,
+  Eye, Percent
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -15,7 +16,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================
-// THÈME
+// THÈME - COULEURS PLUS DISTINCTES
 // ============================================
 const theme = {
   primary: '#1e3a5f',
@@ -32,6 +33,18 @@ const theme = {
   }
 };
 
+// Couleurs très distinctes pour les anesthésistes
+const DISTINCT_COLORS = [
+  '#2563eb', // Bleu vif
+  '#dc2626', // Rouge
+  '#059669', // Vert émeraude
+  '#7c3aed', // Violet
+  '#ea580c', // Orange
+  '#0891b2', // Cyan
+  '#c026d3', // Magenta
+  '#65a30d', // Vert lime
+];
+
 // ============================================
 // HELPERS
 // ============================================
@@ -39,6 +52,11 @@ const formatDateKey = (date) => {
   if (!date) return '';
   const d = new Date(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const parseDateKey = (dateKey) => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
 };
 
 const getMonday = (date) => {
@@ -61,6 +79,11 @@ const isWeekend = (date) => {
   return d.getDay() === 0 || d.getDay() === 6;
 };
 
+const isFriday = (date) => {
+  const d = new Date(date);
+  return d.getDay() === 5;
+};
+
 const getShiftLabel = (shift) => {
   const labels = {
     astreinte: 'Astreinte',
@@ -77,6 +100,52 @@ const ShiftIcon = ({ shift, className = "w-4 h-4" }) => {
   if (shift === 'bloc') return <Building2 className={className} />;
   if (shift === 'consultation') return <Stethoscope className={className} />;
   return <Calendar className={className} />;
+};
+
+// ============================================
+// CALCUL DES JOURS FÉRIÉS FRANÇAIS
+// ============================================
+const getHolidaysForYear = (year) => {
+  // Calcul de Pâques (algorithme de Meeus/Jones/Butcher)
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  const easter = new Date(year, month - 1, day);
+
+  const addDays = (date, days) => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+  };
+
+  const lundiPaques = addDays(easter, 1);
+  const ascension = addDays(easter, 39);
+  const lundiPentecote = addDays(easter, 50);
+
+  return [
+    { date: `${year}-01-01`, name: "Jour de l'an" },
+    { date: formatDateKey(lundiPaques), name: "Lundi de Pâques" },
+    { date: `${year}-05-01`, name: "Fête du Travail" },
+    { date: `${year}-05-08`, name: "Victoire 1945" },
+    { date: formatDateKey(ascension), name: "Ascension" },
+    { date: formatDateKey(lundiPentecote), name: "Lundi de Pentecôte" },
+    { date: `${year}-07-14`, name: "Fête Nationale" },
+    { date: `${year}-08-15`, name: "Assomption" },
+    { date: `${year}-11-01`, name: "Toussaint" },
+    { date: `${year}-11-11`, name: "Armistice 1918" },
+    { date: `${year}-12-25`, name: "Noël" },
+  ];
 };
 
 // ============================================
@@ -141,7 +210,7 @@ const LoginPage = ({ onLogin }) => {
   );
 };
 // ============================================
-// COMPOSANT PRINCIPAL - PARTIE 2
+// COMPOSANT PRINCIPAL
 // ============================================
 
 const AnesthesistScheduler = () => {
@@ -170,10 +239,13 @@ const AnesthesistScheduler = () => {
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [showETPModal, setShowETPModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generateMode, setGenerateMode] = useState('new'); // 'new' ou 'complete'
 
+  // Rôles: 'admin', 'user', 'viewer' (direction)
   const isAdmin = currentUser?.role === 'admin';
+  const isViewer = currentUser?.role === 'viewer';
+  const canEdit = isAdmin; // Seul l'admin peut modifier
   const unreadCount = notifications.filter(n => !n.read).length;
 
   // ============================================
@@ -208,8 +280,14 @@ const AnesthesistScheduler = () => {
       ]);
 
       if (anesth.data) {
-        setAnesthesists(anesth.data);
-        const profile = anesth.data.find(a => a.email === user.email);
+        // Appliquer les couleurs distinctes
+        const anesthWithColors = anesth.data.map((a, index) => ({
+          ...a,
+          color: DISTINCT_COLORS[index % DISTINCT_COLORS.length]
+        }));
+        setAnesthesists(anesthWithColors);
+        
+        const profile = anesthWithColors.find(a => a.email === user.email);
         if (profile) {
           setCurrentUser(profile);
           if (!profile.user_id) {
@@ -218,7 +296,7 @@ const AnesthesistScheduler = () => {
           const { data: prefs } = await supabase.from('email_preferences').select('*').eq('anesthesist_id', profile.id).single();
           if (prefs) setEmailPreferences(prefs);
         }
-        if (selectedFilters.size === 0) setSelectedFilters(new Set(anesth.data.map(a => a.id)));
+        if (selectedFilters.size === 0) setSelectedFilters(new Set(anesthWithColors.map(a => a.id)));
       }
 
       if (sched.data) {
@@ -252,83 +330,59 @@ const AnesthesistScheduler = () => {
   // ============================================
   // HELPERS POUR HOLIDAYS
   // ============================================
-  const isHoliday = (date) => {
-    const dateKey = formatDateKey(date);
-    return holidays.some(h => h.date === dateKey);
-  };
-
-  const getHolidayName = (date) => {
-    const dateKey = formatDateKey(date);
-    return holidays.find(h => h.date === dateKey)?.name;
-  };
-
-  // ============================================
-  // GÉNÉRATION JOURS FÉRIÉS POUR ANNÉES FUTURES
-  // ============================================
-  const getHolidaysForYear = (year) => {
-    // Pâques (algorithme de Meeus/Jones/Butcher)
-    const a = year % 19;
-    const b = Math.floor(year / 100);
-    const c = year % 100;
-    const d = Math.floor(b / 4);
-    const e = b % 4;
-    const f = Math.floor((b + 8) / 25);
-    const g = Math.floor((b - f + 1) / 3);
-    const h = (19 * a + b - d - g + 15) % 30;
-    const i = Math.floor(c / 4);
-    const k = c % 4;
-    const l = (32 + 2 * e + 2 * i - h - k) % 7;
-    const m = Math.floor((a + 11 * h + 22 * l) / 451);
-    const month = Math.floor((h + l - 7 * m + 114) / 31);
-    const day = ((h + l - 7 * m + 114) % 31) + 1;
-    const easter = new Date(year, month - 1, day);
-
-    const lundiPaques = new Date(easter);
-    lundiPaques.setDate(lundiPaques.getDate() + 1);
-
-    const ascension = new Date(easter);
-    ascension.setDate(ascension.getDate() + 39);
-
-    const lundiPentecote = new Date(easter);
-    lundiPentecote.setDate(lundiPentecote.getDate() + 50);
-
-    return [
-      { date: `${year}-01-01`, name: "Jour de l'an" },
-      { date: formatDateKey(lundiPaques), name: "Lundi de Pâques" },
-      { date: `${year}-05-01`, name: "Fête du Travail" },
-      { date: `${year}-05-08`, name: "Victoire 1945" },
-      { date: formatDateKey(ascension), name: "Ascension" },
-      { date: formatDateKey(lundiPentecote), name: "Lundi de Pentecôte" },
-      { date: `${year}-07-14`, name: "Fête Nationale" },
-      { date: `${year}-08-15`, name: "Assomption" },
-      { date: `${year}-11-01`, name: "Toussaint" },
-      { date: `${year}-11-11`, name: "Armistice 1918" },
-      { date: `${year}-12-25`, name: "Noël" },
-    ];
-  };
-
-  // Fusionner les jours fériés de la DB avec ceux calculés
-  const getAllHolidays = (startDate, endDate) => {
-    const allHolidays = [...holidays];
+  const getAllHolidaysForPeriod = (startDate, endDate) => {
+    const allHolidays = [];
     const startYear = startDate.getFullYear();
     const endYear = endDate.getFullYear();
 
     for (let year = startYear; year <= endYear; year++) {
       const yearHolidays = getHolidaysForYear(year);
       yearHolidays.forEach(h => {
-        if (!allHolidays.some(existing => existing.date === h.date)) {
+        const hDate = new Date(h.date);
+        if (hDate >= startDate && hDate <= endDate) {
           allHolidays.push(h);
         }
       });
     }
+    return allHolidays;
+  };
 
-    return allHolidays.filter(h => {
-      const hDate = new Date(h.date);
-      return hDate >= startDate && hDate <= endDate;
-    });
+  const isHolidayDate = (date, holidaysList) => {
+    const dateKey = formatDateKey(date);
+    return holidaysList.some(h => h.date === dateKey);
+  };
+
+  const isHoliday = (date) => {
+    const dateKey = formatDateKey(date);
+    // Vérifier dans la liste dynamique
+    const year = new Date(date).getFullYear();
+    const yearHolidays = getHolidaysForYear(year);
+    return yearHolidays.some(h => h.date === dateKey) || holidays.some(h => h.date === dateKey);
+  };
+
+  const getHolidayName = (date) => {
+    const dateKey = formatDateKey(date);
+    const year = new Date(date).getFullYear();
+    const yearHolidays = getHolidaysForYear(year);
+    const found = yearHolidays.find(h => h.date === dateKey) || holidays.find(h => h.date === dateKey);
+    return found?.name;
+  };
+
+  // Vérifie si la veille est un jour férié ou un vendredi (veille de WE)
+  const isEveOfHolidayOrWeekend = (date, holidaysList) => {
+    const nextDay = new Date(date);
+    nextDay.setDate(nextDay.getDate() + 1);
+    
+    // Si demain est samedi (donc aujourd'hui vendredi)
+    if (nextDay.getDay() === 6) return true;
+    
+    // Si demain est un jour férié (et pas un WE)
+    if (isHolidayDate(nextDay, holidaysList) && !isWeekend(nextDay)) return true;
+    
+    return false;
   };
   // ============================================
-  // GÉNÉRATION DU PLANNING - CORRIGÉE
+  // GÉNÉRATION DU PLANNING - VERSION CORRIGÉE
   // ============================================
   const generateSchedule = async (mode = 'new') => {
     if (!isAdmin || isGenerating) return;
@@ -336,18 +390,25 @@ const AnesthesistScheduler = () => {
     setShowGenerateModal(false);
 
     try {
+      // ============================================
+      // PÉRIODE : AUJOURD'HUI + 18 MOIS (FUTUR UNIQUEMENT)
+      // ============================================
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      // Période : 18 mois à partir d'aujourd'hui
       const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() + 1); // Commencer demain
+      
       const endDate = new Date(today);
       endDate.setMonth(endDate.getMonth() + 18);
 
-      // Si mode "nouveau", on efface tout à partir d'aujourd'hui
+      console.log(`Génération du ${formatDateKey(startDate)} au ${formatDateKey(endDate)}`);
+
+      // Si mode "nouveau", on efface tout à partir de demain
       if (mode === 'new') {
-        const todayKey = formatDateKey(today);
-        await supabase.from('schedule').delete().gte('date', todayKey);
+        const startKey = formatDateKey(startDate);
+        const { error: deleteError } = await supabase.from('schedule').delete().gte('date', startKey);
+        if (deleteError) console.error('Erreur suppression:', deleteError);
       }
 
       // Récupérer les dates déjà planifiées (pour mode "compléter")
@@ -360,13 +421,30 @@ const AnesthesistScheduler = () => {
       }
 
       // Récupérer tous les jours fériés pour la période
-      const allHolidays = getAllHolidays(startDate, endDate);
+      const allHolidays = getAllHolidaysForPeriod(startDate, endDate);
       const holidayDates = new Set(allHolidays.map(h => h.date));
+      
+      console.log('Jours fériés trouvés:', allHolidays.map(h => `${h.date}: ${h.name}`));
 
-      // Stats pour équilibrage
+      // ============================================
+      // STATS POUR ÉQUILIBRAGE AVEC ETP
+      // ============================================
       const stats = {};
       anesthesists.forEach(a => { 
-        stats[a.id] = { we: 0, ferie: 0, astreinte: 0, bloc: 0, consultation: 0 }; 
+        const etp = a.etp || 0.5; // Par défaut 50%
+        stats[a.id] = { 
+          we: 0, 
+          ferie: 0, 
+          astreinte: 0, 
+          bloc: 0, 
+          consultation: 0,
+          total: 0,
+          etp: etp,
+          // Score pondéré par ETP (plus l'ETP est élevé, plus on doit travailler)
+          getWeightedScore: function(type) {
+            return this[type] / this.etp;
+          }
+        }; 
       });
 
       // Collecter les indisponibilités
@@ -384,125 +462,168 @@ const AnesthesistScheduler = () => {
 
       const getAvailable = (dateKey) => {
         const unavail = unavailDates[dateKey] || new Set();
-        return anesthesists.filter(a => !unavail.has(a.id));
+        return anesthesists.filter(a => !unavail.has(a.id) && a.role !== 'viewer');
       };
 
+      // Sélectionner celui avec le moins de gardes pondéré par ETP
       const pickBest = (available, statKey) => {
         if (available.length === 0) return null;
-        const sorted = [...available].sort((a, b) => stats[a.id][statKey] - stats[b.id][statKey]);
+        const sorted = [...available].sort((a, b) => {
+          const scoreA = stats[a.id].getWeightedScore(statKey);
+          const scoreB = stats[b.id].getWeightedScore(statKey);
+          return scoreA - scoreB;
+        });
         return sorted[0];
       };
 
       const inserts = [];
 
       // ============================================
-      // 1. GÉNÉRER LES WEEK-ENDS (1 personne pour sam+dim)
+      // PARCOURIR CHAQUE JOUR
       // ============================================
       let current = new Date(startDate);
-      // Aller au prochain samedi
-      while (current.getDay() !== 6 && current <= endDate) {
-        current.setDate(current.getDate() + 1);
-      }
-
-      while (current <= endDate) {
-        const satKey = formatDateKey(current);
-        const sunday = new Date(current);
-        sunday.setDate(sunday.getDate() + 1);
-        const sunKey = formatDateKey(sunday);
-
-        // Vérifier si déjà planifié
-        if (!existingDates.has(satKey) && !existingDates.has(sunKey)) {
-          // Trouver quelqu'un disponible les 2 jours
-          const satAvail = getAvailable(satKey);
-          const sunAvail = getAvailable(sunKey);
-          const available = satAvail.filter(a => sunAvail.some(s => s.id === a.id));
-
-          const picked = pickBest(available, 'we');
-          
-          if (picked) {
-            inserts.push({ date: satKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: current.getFullYear() });
-            inserts.push({ date: sunKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: sunday.getFullYear() });
-            stats[picked.id].we++;
-          }
-        }
-
-        // Passer au samedi suivant
-        current.setDate(current.getDate() + 7);
-      }
-
-      // ============================================
-      // 2. GÉNÉRER LES JOURS FÉRIÉS (1 personne)
-      // ============================================
-      for (const hol of allHolidays) {
-        const holDate = new Date(hol.date);
-        
-        // Ne pas traiter si c'est un week-end (déjà couvert)
-        if (isWeekend(holDate)) continue;
-        
-        // Ne pas traiter si déjà planifié
-        if (existingDates.has(hol.date)) continue;
-
-        const available = getAvailable(hol.date);
-        const picked = pickBest(available, 'ferie');
-        
-        if (picked) {
-          inserts.push({ date: hol.date, shift: 'astreinte_ferie', anesthesist_id: picked.id, year: holDate.getFullYear() });
-          stats[picked.id].ferie++;
-        }
-      }
-
-      // ============================================
-      // 3. GÉNÉRER LES JOURS DE SEMAINE
-      // ============================================
-      current = new Date(startDate);
       
       while (current <= endDate) {
-        const dayOfWeek = current.getDay();
         const dateKey = formatDateKey(current);
-        const isHol = holidayDates.has(dateKey);
+        const dayOfWeek = current.getDay();
         const isWE = dayOfWeek === 0 || dayOfWeek === 6;
+        const isHol = holidayDates.has(dateKey);
+        const isFri = dayOfWeek === 5;
+        
+        // Vérifier si c'est la veille d'un WE ou d'un férié
+        const nextDay = new Date(current);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const nextDayKey = formatDateKey(nextDay);
+        const isNextDayWE = nextDay.getDay() === 6 || nextDay.getDay() === 0;
+        const isNextDayHoliday = holidayDates.has(nextDayKey) && !isWeekend(nextDay);
+        const isEveOfSpecial = isFri || isNextDayHoliday;
+        
+        // Skip si déjà planifié
+        if (existingDates.has(dateKey)) {
+          current.setDate(current.getDate() + 1);
+          continue;
+        }
 
-        // Seulement les jours de semaine non fériés
+        const available = getAvailable(dateKey);
+
+        // ============================================
+        // CAS 1: SAMEDI (début de WE)
+        // ============================================
+        if (dayOfWeek === 6) {
+          // L'astreinte du WE est celle du vendredi soir
+          // On cherche qui était d'astreinte vendredi
+          const friday = new Date(current);
+          friday.setDate(friday.getDate() - 1);
+          const fridayKey = formatDateKey(friday);
+          
+          // Récupérer l'astreinte du vendredi dans les inserts
+          const fridayAstreinte = inserts.find(i => i.date === fridayKey && i.shift === 'astreinte');
+          
+          if (fridayAstreinte) {
+            // Même personne pour samedi et dimanche
+            inserts.push({ date: dateKey, shift: 'astreinte_we', anesthesist_id: fridayAstreinte.anesthesist_id, year: current.getFullYear() });
+            
+            const sunday = new Date(current);
+            sunday.setDate(sunday.getDate() + 1);
+            const sundayKey = formatDateKey(sunday);
+            inserts.push({ date: sundayKey, shift: 'astreinte_we', anesthesist_id: fridayAstreinte.anesthesist_id, year: sunday.getFullYear() });
+            
+            stats[fridayAstreinte.anesthesist_id].we++;
+          } else {
+            // Pas d'astreinte vendredi trouvée, prendre quelqu'un
+            const picked = pickBest(available, 'we');
+            if (picked) {
+              inserts.push({ date: dateKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: current.getFullYear() });
+              const sunday = new Date(current);
+              sunday.setDate(sunday.getDate() + 1);
+              const sundayKey = formatDateKey(sunday);
+              inserts.push({ date: sundayKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: sunday.getFullYear() });
+              stats[picked.id].we++;
+            }
+          }
+          // Sauter au lundi (on a traité sam+dim)
+          current.setDate(current.getDate() + 2);
+          continue;
+        }
+
+        // ============================================
+        // CAS 2: DIMANCHE (déjà traité avec samedi)
+        // ============================================
+        if (dayOfWeek === 0) {
+          current.setDate(current.getDate() + 1);
+          continue;
+        }
+
+        // ============================================
+        // CAS 3: JOUR FÉRIÉ (semaine)
+        // ============================================
+        if (isHol && !isWE) {
+          // L'astreinte du férié est celle de la veille
+          const yesterday = new Date(current);
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yesterdayKey = formatDateKey(yesterday);
+          
+          const yesterdayAstreinte = inserts.find(i => i.date === yesterdayKey && i.shift === 'astreinte');
+          
+          if (yesterdayAstreinte) {
+            inserts.push({ date: dateKey, shift: 'astreinte_ferie', anesthesist_id: yesterdayAstreinte.anesthesist_id, year: current.getFullYear() });
+            stats[yesterdayAstreinte.anesthesist_id].ferie++;
+          } else {
+            const picked = pickBest(available, 'ferie');
+            if (picked) {
+              inserts.push({ date: dateKey, shift: 'astreinte_ferie', anesthesist_id: picked.id, year: current.getFullYear() });
+              stats[picked.id].ferie++;
+            }
+          }
+          current.setDate(current.getDate() + 1);
+          continue;
+        }
+
+        // ============================================
+        // CAS 4: JOUR DE SEMAINE NORMAL
+        // ============================================
         if (dayOfWeek >= 1 && dayOfWeek <= 5 && !isHol) {
-          // Vérifier si déjà planifié
-          if (!existingDates.has(dateKey)) {
-            const available = getAvailable(dateKey);
-            const alreadyAssigned = new Set();
+          const alreadyAssigned = new Set();
 
-            // ASTREINTE (1 personne)
-            const astrAvail = available.filter(a => !alreadyAssigned.has(a.id));
-            const astrPicked = pickBest(astrAvail, 'astreinte');
-            if (astrPicked) {
-              inserts.push({ date: dateKey, shift: 'astreinte', anesthesist_id: astrPicked.id, year: current.getFullYear() });
-              stats[astrPicked.id].astreinte++;
-              alreadyAssigned.add(astrPicked.id);
-            }
+          // 1. ASTREINTE (1 personne) - sera aussi au bloc
+          const astrAvail = available.filter(a => !alreadyAssigned.has(a.id));
+          const astrPicked = pickBest(astrAvail, 'astreinte');
+          
+          if (astrPicked) {
+            // Astreinte
+            inserts.push({ date: dateKey, shift: 'astreinte', anesthesist_id: astrPicked.id, year: current.getFullYear() });
+            stats[astrPicked.id].astreinte++;
+            
+            // Celui d'astreinte est aussi au bloc
+            inserts.push({ date: dateKey, shift: 'bloc', anesthesist_id: astrPicked.id, year: current.getFullYear() });
+            stats[astrPicked.id].bloc++;
+            alreadyAssigned.add(astrPicked.id);
+          }
 
-            // BLOC (2 personnes)
-            for (let i = 0; i < 2; i++) {
-              const blocAvail = available.filter(a => !alreadyAssigned.has(a.id));
-              const blocPicked = pickBest(blocAvail, 'bloc');
-              if (blocPicked) {
-                inserts.push({ date: dateKey, shift: 'bloc', anesthesist_id: blocPicked.id, year: current.getFullYear() });
-                stats[blocPicked.id].bloc++;
-                alreadyAssigned.add(blocPicked.id);
-              }
-            }
+          // 2. BLOC - 2ème personne (1 de plus, total 2 au bloc)
+          const blocAvail = available.filter(a => !alreadyAssigned.has(a.id));
+          const blocPicked = pickBest(blocAvail, 'bloc');
+          
+          if (blocPicked) {
+            inserts.push({ date: dateKey, shift: 'bloc', anesthesist_id: blocPicked.id, year: current.getFullYear() });
+            stats[blocPicked.id].bloc++;
+            alreadyAssigned.add(blocPicked.id);
+          }
 
-            // CONSULTATION (1 personne)
-            const consAvail = available.filter(a => !alreadyAssigned.has(a.id));
-            const consPicked = pickBest(consAvail, 'consultation');
-            if (consPicked) {
-              inserts.push({ date: dateKey, shift: 'consultation', anesthesist_id: consPicked.id, year: current.getFullYear() });
-              stats[consPicked.id].consultation++;
-            }
+          // 3. CONSULTATION (1 personne, différente des autres)
+          const consAvail = available.filter(a => !alreadyAssigned.has(a.id));
+          const consPicked = pickBest(consAvail, 'consultation');
+          
+          if (consPicked) {
+            inserts.push({ date: dateKey, shift: 'consultation', anesthesist_id: consPicked.id, year: current.getFullYear() });
+            stats[consPicked.id].consultation++;
           }
         }
 
         current.setDate(current.getDate() + 1);
       }
 
-      console.log(`Génération: ${inserts.length} entrées à insérer`);
+      console.log(`Génération terminée: ${inserts.length} entrées à insérer`);
 
       // Insérer par batch de 500
       for (let i = 0; i < inserts.length; i += 500) {
@@ -523,10 +644,11 @@ const AnesthesistScheduler = () => {
 
       // Recharger les données
       await loadData();
+      alert(`Planning généré avec succès ! ${inserts.length} entrées créées.`);
 
     } catch (error) {
       console.error('Erreur génération:', error);
-      alert('Erreur lors de la génération du planning');
+      alert('Erreur lors de la génération du planning: ' + error.message);
     } finally {
       setIsGenerating(false);
     }
@@ -535,7 +657,7 @@ const AnesthesistScheduler = () => {
   // ACTIONS
   // ============================================
   const toggleAssignment = async (date, anesthesistId, shift) => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     const dateKey = formatDateKey(date);
     const exists = schedule[dateKey]?.[shift]?.includes(anesthesistId);
 
@@ -544,6 +666,12 @@ const AnesthesistScheduler = () => {
     } else {
       await supabase.from('schedule').insert({ date: dateKey, shift, anesthesist_id: anesthesistId, year: new Date(date).getFullYear() });
     }
+    await loadData();
+  };
+
+  const updateETP = async (anesthesistId, newETP) => {
+    if (!isAdmin) return;
+    await supabase.from('anesthesists').update({ etp: newETP }).eq('id', anesthesistId);
     await loadData();
   };
 
@@ -604,7 +732,14 @@ const AnesthesistScheduler = () => {
   // ============================================
   const calculateStats = () => {
     const stats = anesthesists.map(a => ({
-      ...a, bloc: 0, consultation: 0, astreinte: 0, we: 0, ferie: 0, total: 0
+      ...a, 
+      bloc: 0, 
+      consultation: 0, 
+      astreinte: 0, 
+      we: 0, 
+      ferie: 0, 
+      total: 0,
+      etp: a.etp || 0.5
     }));
 
     Object.entries(schedule).forEach(([dateKey, shifts]) => {
@@ -630,9 +765,10 @@ const AnesthesistScheduler = () => {
   // ============================================
   const getWeekDays = (start) => {
     const days = [];
+    const s = new Date(start);
     for (let i = 0; i < 7; i++) {
-      const d = new Date(start);
-      d.setDate(d.getDate() + i);
+      const d = new Date(s);
+      d.setDate(s.getDate() + i);
       days.push(d);
     }
     return days;
@@ -696,13 +832,13 @@ const AnesthesistScheduler = () => {
 
         <nav className="flex-1 p-4">
           {[
-            { id: 'dashboard', icon: Home, label: 'Tableau de bord' },
-            { id: 'planning', icon: Calendar, label: 'Planning' },
-            { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges' },
-            { id: 'unavailabilities', icon: CalendarOff, label: 'Indisponibilités' },
-            ...(isAdmin ? [{ id: 'admin', icon: Shield, label: 'Administration' }] : []),
-            { id: 'settings', icon: Settings, label: 'Paramètres' },
-          ].map(item => (
+            { id: 'dashboard', icon: Home, label: 'Tableau de bord', show: !isViewer },
+            { id: 'planning', icon: Calendar, label: 'Planning', show: true },
+            { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges', show: !isViewer },
+            { id: 'unavailabilities', icon: CalendarOff, label: 'Indisponibilités', show: !isViewer },
+            { id: 'admin', icon: Shield, label: 'Administration', show: isAdmin },
+            { id: 'settings', icon: Settings, label: 'Paramètres', show: !isViewer },
+          ].filter(item => item.show).map(item => (
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id)}
@@ -718,12 +854,14 @@ const AnesthesistScheduler = () => {
 
         <div className="p-4 border-t border-white/10">
           <div className="flex items-center gap-3 px-4 py-2">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: currentUser?.color }}>
-              {currentUser?.name?.split(' ').map(n => n[0]).join('')}
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: currentUser?.color || theme.accent }}>
+              {currentUser?.name?.split(' ').map(n => n[0]).join('') || '?'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm truncate">{currentUser?.name}</p>
-              <p className="text-xs text-white/60">{isAdmin ? 'Admin' : 'Utilisateur'}</p>
+              <p className="font-medium text-sm truncate">{currentUser?.name || 'Utilisateur'}</p>
+              <p className="text-xs text-white/60">
+                {isAdmin ? 'Admin' : isViewer ? 'Consultation' : 'Utilisateur'}
+              </p>
             </div>
           </div>
         </div>
@@ -742,12 +880,14 @@ const AnesthesistScheduler = () => {
             {currentView === 'settings' && 'Paramètres'}
           </h1>
           <div className="flex items-center gap-3">
-            <button onClick={() => setShowNotifications(true)} className="relative p-2 rounded-xl hover:bg-gray-100">
-              <Bell className="w-6 h-6" style={{ color: theme.gray[600] }} />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">{unreadCount}</span>
-              )}
-            </button>
+            {!isViewer && (
+              <button onClick={() => setShowNotifications(true)} className="relative p-2 rounded-xl hover:bg-gray-100">
+                <Bell className="w-6 h-6" style={{ color: theme.gray[600] }} />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">{unreadCount}</span>
+                )}
+              </button>
+            )}
             <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-gray-100" style={{ color: theme.gray[600] }}>
               <LogOut className="w-5 h-5" /><span>Déconnexion</span>
             </button>
@@ -757,7 +897,7 @@ const AnesthesistScheduler = () => {
         {/* Content */}
         <main className="p-8">
           {/* DASHBOARD */}
-          {currentView === 'dashboard' && (
+          {currentView === 'dashboard' && !isViewer && (
             <div>
               <div className="mb-8">
                 <h2 className="text-2xl font-bold" style={{ color: theme.gray[800] }}>Bonjour, {currentUser?.name?.split(' ')[0]} 👋</h2>
@@ -782,6 +922,9 @@ const AnesthesistScheduler = () => {
                         ))}
                       </div>
                     ))}
+                  {Object.entries(schedule).filter(([dk]) => new Date(dk) >= new Date()).filter(([dk, shifts]) => Object.values(shifts).flat().includes(currentUser?.id)).length === 0 && (
+                    <p className="text-sm" style={{ color: theme.gray[500] }}>Aucun poste à venir</p>
+                  )}
                   <button onClick={() => setCurrentView('planning')} className="text-sm font-medium mt-4" style={{ color: theme.accent }}>Voir le planning →</button>
                 </div>
 
@@ -830,21 +973,39 @@ const AnesthesistScheduler = () => {
                       <TrendingUp className="w-4 h-4" /> Stats
                     </button>
                     {isAdmin && (
-                      <button 
-                        onClick={() => setShowGenerateModal(true)} 
-                        disabled={isGenerating} 
-                        className="px-4 py-2 rounded-xl text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50" 
-                        style={{ backgroundColor: theme.success }}
-                      >
-                        {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                        {isGenerating ? 'Génération...' : 'Générer'}
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => setShowETPModal(true)} 
+                          className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium flex items-center gap-2"
+                        >
+                          <Percent className="w-4 h-4" /> ETP
+                        </button>
+                        <button 
+                          onClick={() => setShowGenerateModal(true)} 
+                          disabled={isGenerating} 
+                          className="px-4 py-2 rounded-xl text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50" 
+                          style={{ backgroundColor: theme.success }}
+                        >
+                          {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                          {isGenerating ? 'Génération...' : 'Générer'}
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
 
                 <div className="flex items-center justify-center gap-4">
-                  <button onClick={() => viewMode === 'week' ? setCurrentWeekStart(new Date(new Date(currentWeekStart).setDate(currentWeekStart.getDate() - 7))) : setCurrentMonth(new Date(new Date(currentMonth).setMonth(currentMonth.getMonth() - 1)))} className="p-2 rounded-xl hover:bg-gray-100">
+                  <button onClick={() => {
+                    if (viewMode === 'week') {
+                      const newDate = new Date(currentWeekStart);
+                      newDate.setDate(newDate.getDate() - 7);
+                      setCurrentWeekStart(newDate);
+                    } else {
+                      const newDate = new Date(currentMonth);
+                      newDate.setMonth(newDate.getMonth() - 1);
+                      setCurrentMonth(newDate);
+                    }
+                  }} className="p-2 rounded-xl hover:bg-gray-100">
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <button onClick={() => { setCurrentWeekStart(getMonday(new Date())); setCurrentMonth(new Date()); }} className="px-4 py-2 rounded-xl text-sm" style={{ backgroundColor: theme.gray[100] }}>Aujourd'hui</button>
@@ -853,7 +1014,17 @@ const AnesthesistScheduler = () => {
                       ? `Semaine ${getWeekNumber(currentWeekStart)} - ${currentWeekStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}` 
                       : currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
                   </span>
-                  <button onClick={() => viewMode === 'week' ? setCurrentWeekStart(new Date(new Date(currentWeekStart).setDate(currentWeekStart.getDate() + 7))) : setCurrentMonth(new Date(new Date(currentMonth).setMonth(currentMonth.getMonth() + 1)))} className="p-2 rounded-xl hover:bg-gray-100">
+                  <button onClick={() => {
+                    if (viewMode === 'week') {
+                      const newDate = new Date(currentWeekStart);
+                      newDate.setDate(newDate.getDate() + 7);
+                      setCurrentWeekStart(newDate);
+                    } else {
+                      const newDate = new Date(currentMonth);
+                      newDate.setMonth(newDate.getMonth() + 1);
+                      setCurrentMonth(newDate);
+                    }
+                  }} className="p-2 rounded-xl hover:bg-gray-100">
                     <ChevronRight className="w-5 h-5" />
                   </button>
                 </div>
@@ -863,11 +1034,12 @@ const AnesthesistScheduler = () => {
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                   <h3 className="font-bold mb-4">Statistiques</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {stats.map(s => (
+                    {stats.filter(s => s.role !== 'viewer').map(s => (
                       <div key={s.id} className={`p-4 rounded-xl ${s.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} style={{ backgroundColor: theme.gray[50] }}>
                         <div className="flex items-center gap-2 mb-2">
                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: s.color }} />
                           <span className="font-medium text-sm">{s.name.split(' ')[1]}</span>
+                          <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: theme.gray[200] }}>{Math.round((s.etp || 0.5) * 100)}%</span>
                         </div>
                         <div className="text-xs space-y-1" style={{ color: theme.gray[600] }}>
                           <div>Bloc: {s.bloc} | Cs: {s.consultation}</div>
@@ -891,7 +1063,7 @@ const AnesthesistScheduler = () => {
                         <div key={i} className={`p-4 text-center border-r last:border-r-0 ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''}`}>
                           <p className="text-xs font-medium uppercase" style={{ color: theme.gray[500] }}>{d.toLocaleDateString('fr-FR', { weekday: 'short' })}</p>
                           <p className={`text-xl font-bold mt-1 ${isToday ? 'bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center mx-auto' : ''}`}>{d.getDate()}</p>
-                          {isHol && <p className="text-xs mt-1" style={{ color: theme.warning }}><Star className="w-3 h-3 inline" /> {getHolidayName(d)}</p>}
+                          {isHol && <p className="text-xs mt-1 truncate" style={{ color: theme.warning }}><Star className="w-3 h-3 inline" /> {getHolidayName(d)}</p>}
                           {isWE && !isHol && <p className="text-xs mt-1" style={{ color: theme.gray[400] }}>Week-end</p>}
                         </div>
                       );
@@ -913,21 +1085,21 @@ const AnesthesistScheduler = () => {
                               {getAssigned(d, shift).map(a => (
                                 <div 
                                   key={a.id} 
-                                  onClick={() => isAdmin && toggleAssignment(d, a.id, shift)} 
-                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${isAdmin ? 'cursor-pointer hover:opacity-80' : ''} ${a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
+                                  onClick={() => canEdit && toggleAssignment(d, a.id, shift)} 
+                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : ''} ${a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
                                   style={{ backgroundColor: a.color }}
                                 >
                                   Dr {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}
                                 </div>
                               ))}
-                              {isAdmin && (
+                              {canEdit && (
                                 <select 
                                   className="w-full text-xs p-1.5 border rounded-lg mt-1" 
                                   value="" 
                                   onChange={(e) => e.target.value && toggleAssignment(d, parseInt(e.target.value), shift)}
                                 >
                                   <option value="">+ Ajouter</option>
-                                  {anesthesists.filter(a => !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
+                                  {anesthesists.filter(a => a.role !== 'viewer' && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
                                     <option key={a.id} value={a.id}>{a.name}</option>
                                   ))}
                                 </select>
@@ -977,7 +1149,7 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border border-gray-200 p-4 mt-6">
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="font-medium text-sm" style={{ color: theme.gray[700] }}><Users className="w-4 h-4 inline mr-1" />Filtrer :</span>
-                  {anesthesists.map(a => (
+                  {anesthesists.filter(a => a.role !== 'viewer').map(a => (
                     <button 
                       key={a.id} 
                       onClick={() => { const f = new Set(selectedFilters); f.has(a.id) ? f.delete(a.id) : f.add(a.id); setSelectedFilters(f); }}
@@ -994,7 +1166,7 @@ const AnesthesistScheduler = () => {
             </div>
           )}
           {/* BOURSE AUX ÉCHANGES */}
-          {currentView === 'exchange' && (
+          {currentView === 'exchange' && !isViewer && (
             <div>
               <div className="flex justify-between mb-6">
                 <p style={{ color: theme.gray[500] }}>Proposez ou prenez des gardes</p>
@@ -1032,7 +1204,7 @@ const AnesthesistScheduler = () => {
           )}
 
           {/* INDISPONIBILITÉS */}
-          {currentView === 'unavailabilities' && (
+          {currentView === 'unavailabilities' && !isViewer && (
             <div>
               <div className="flex justify-between mb-6">
                 <p style={{ color: theme.gray[500] }}>Déclarez vos congés et absences</p>
@@ -1088,24 +1260,63 @@ const AnesthesistScheduler = () => {
           {currentView === 'admin' && isAdmin && (
             <div>
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <h3 className="font-bold mb-4">Gestion des ETP</h3>
+                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Ajustez le pourcentage de temps de travail de chaque anesthésiste.</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {anesthesists.filter(a => a.role !== 'viewer').map(a => (
+                    <div key={a.id} className="p-4 rounded-xl border border-gray-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: a.color }} />
+                        <span className="font-medium text-sm">{a.name.split(' ')[1]}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="number" 
+                          min="10" 
+                          max="100" 
+                          step="5"
+                          value={Math.round((a.etp || 0.5) * 100)} 
+                          onChange={(e) => updateETP(a.id, parseInt(e.target.value) / 100)}
+                          className="w-20 px-2 py-1 border rounded-lg text-center text-sm"
+                        />
+                        <span className="text-sm" style={{ color: theme.gray[500] }}>%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <h3 className="font-bold mb-4">Transférer le rôle admin</h3>
-                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Attention : cette action est irréversible. Vous perdrez vos droits d'administration.</p>
+                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Attention : cette action est irréversible.</p>
                 <select 
                   className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-xl" 
                   onChange={(e) => e.target.value && transferAdmin(parseInt(e.target.value))}
                   defaultValue=""
                 >
                   <option value="">Choisir un anesthésiste...</option>
-                  {anesthesists.filter(a => a.id !== currentUser?.id).map(a => (
+                  {anesthesists.filter(a => a.id !== currentUser?.id && a.role !== 'viewer').map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="font-bold mb-4">Jours fériés {new Date().getFullYear()}</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {getHolidaysForYear(new Date().getFullYear()).map(h => (
+                    <div key={h.date} className="p-2 rounded-lg text-sm" style={{ backgroundColor: theme.gray[50] }}>
+                      <span className="font-medium">{new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
+                      <span className="ml-2" style={{ color: theme.gray[500] }}>{h.name}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {/* SETTINGS */}
-          {currentView === 'settings' && (
+          {currentView === 'settings' && !isViewer && (
             <div>
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <h3 className="font-bold mb-4">Lien calendrier ICS</h3>
@@ -1151,12 +1362,13 @@ const AnesthesistScheduler = () => {
             </div>
             <div className="p-6">
               <p className="text-sm mb-6" style={{ color: theme.gray[600] }}>
-                Le planning sera généré sur <strong>18 mois</strong> à partir d'aujourd'hui.
+                Le planning sera généré sur <strong>18 mois</strong> à partir de demain.<br/>
+                <span className="text-xs">Règles appliquées : celui d'astreinte = au bloc, astreinte veille WE/férié = astreinte WE/férié</span>
               </p>
               
               <div className="space-y-3 mb-6">
                 <button
-                  onClick={() => { setGenerateMode('new'); generateSchedule('new'); }}
+                  onClick={() => generateSchedule('new')}
                   disabled={isGenerating}
                   className="w-full p-4 rounded-xl border-2 text-left hover:border-blue-500 transition-colors disabled:opacity-50"
                 >
@@ -1170,7 +1382,7 @@ const AnesthesistScheduler = () => {
                 </button>
                 
                 <button
-                  onClick={() => { setGenerateMode('complete'); generateSchedule('complete'); }}
+                  onClick={() => generateSchedule('complete')}
                   disabled={isGenerating}
                   className="w-full p-4 rounded-xl border-2 text-left hover:border-blue-500 transition-colors disabled:opacity-50"
                 >
@@ -1190,6 +1402,45 @@ const AnesthesistScheduler = () => {
                   Génération en cours...
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ETP */}
+      {showETPModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">Gestion des ETP</h2>
+              <button onClick={() => setShowETPModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
+                Ajustez le pourcentage de temps de travail. La répartition des gardes sera proportionnelle à l'ETP.
+              </p>
+              <div className="space-y-3">
+                {anesthesists.filter(a => a.role !== 'viewer').map(a => (
+                  <div key={a.id} className="flex items-center justify-between p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: a.color }} />
+                      <span className="font-medium">{a.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="range" 
+                        min="10" 
+                        max="100" 
+                        step="5"
+                        value={Math.round((a.etp || 0.5) * 100)} 
+                        onChange={(e) => updateETP(a.id, parseInt(e.target.value) / 100)}
+                        className="w-24"
+                      />
+                      <span className="w-12 text-center font-bold" style={{ color: theme.primary }}>{Math.round((a.etp || 0.5) * 100)}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1271,7 +1522,7 @@ const AnesthesistScheduler = () => {
                 <label className="block text-sm font-medium mb-1">Échanger avec</label>
                 <select name="target" required className="w-full px-3 py-2 border rounded-xl">
                   <option value="">Sélectionner...</option>
-                  {anesthesists.filter(a => a.id !== currentUser?.id).map(a => (
+                  {anesthesists.filter(a => a.id !== currentUser?.id && a.role !== 'viewer').map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
