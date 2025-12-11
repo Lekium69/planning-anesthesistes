@@ -209,6 +209,110 @@ const LoginPage = ({ onLogin }) => {
     </div>
   );
 };
+
+// ============================================
+// COMPOSANT ETP MODAL (avec validation 400%)
+// ============================================
+const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
+  const TARGET_ETP = 4.0; // 400% = 4 ETP
+  
+  // État local pour les modifications
+  const [etpValues, setEtpValues] = useState(() => {
+    const initial = {};
+    anesthesists.forEach(a => {
+      initial[a.id] = a.etp || 0.5;
+    });
+    return initial;
+  });
+
+  // Calculer le total
+  const totalETP = Object.values(etpValues).reduce((sum, val) => sum + val, 0);
+  const totalPercent = Math.round(totalETP * 100);
+  const isValid = Math.abs(totalETP - TARGET_ETP) < 0.01; // Tolérance pour les arrondis
+
+  const handleChange = (id, newValue) => {
+    setEtpValues(prev => ({
+      ...prev,
+      [id]: newValue
+    }));
+  };
+
+  const handleSave = () => {
+    if (!isValid) {
+      alert(`Le total doit être égal à ${TARGET_ETP * 100}% (${TARGET_ETP} ETP).\n\nActuellement : ${totalPercent}%`);
+      return;
+    }
+    onSave(etpValues);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+        <div className="p-6 border-b flex items-center justify-between">
+          <h2 className="text-xl font-bold">Gestion des ETP</h2>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-6">
+          <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
+            Ajustez le pourcentage de temps de travail. Le total doit être égal à <strong>{TARGET_ETP * 100}%</strong> ({TARGET_ETP} ETP).
+          </p>
+          
+          {/* Indicateur du total */}
+          <div className={`mb-4 p-3 rounded-xl flex items-center justify-between ${isValid ? 'bg-green-50' : 'bg-red-50'}`}>
+            <span className="font-medium">Total ETP :</span>
+            <span className={`text-xl font-bold ${isValid ? 'text-green-600' : 'text-red-600'}`}>
+              {totalPercent}% / {TARGET_ETP * 100}%
+            </span>
+          </div>
+          
+          <div className="space-y-3 max-h-80 overflow-y-auto">
+            {anesthesists.map(a => (
+              <div key={a.id} className="flex items-center justify-between p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-4 h-4 rounded-full" style={{ backgroundColor: a.color }} />
+                  <span className="font-medium">{a.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="100" 
+                    step="5"
+                    value={Math.round(etpValues[a.id] * 100)} 
+                    onChange={(e) => handleChange(a.id, parseInt(e.target.value) / 100)}
+                    className="w-24"
+                  />
+                  <span className="w-12 text-center font-bold" style={{ color: theme.primary }}>
+                    {Math.round(etpValues[a.id] * 100)}%
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <div className="mt-6 flex gap-3">
+            <button 
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl font-medium border"
+              style={{ borderColor: theme.gray[300], color: theme.gray[600] }}
+            >
+              Annuler
+            </button>
+            <button 
+              onClick={handleSave}
+              disabled={!isValid}
+              className={`flex-1 py-3 rounded-xl font-medium text-white ${!isValid ? 'opacity-50 cursor-not-allowed' : ''}`}
+              style={{ backgroundColor: isValid ? theme.success : theme.gray[400] }}
+            >
+              {isValid ? 'Enregistrer' : `Total ≠ ${TARGET_ETP * 100}%`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ============================================
 // COMPOSANT PRINCIPAL
 // ============================================
@@ -1508,41 +1612,18 @@ const AnesthesistScheduler = () => {
 
       {/* MODAL ETP */}
       {showETPModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h2 className="text-xl font-bold">Gestion des ETP</h2>
-              <button onClick={() => setShowETPModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-6">
-              <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
-                Ajustez le pourcentage de temps de travail. La répartition des gardes sera proportionnelle à l'ETP.
-              </p>
-              <div className="space-y-3">
-                {anesthesists.filter(a => a.role !== 'viewer').map(a => (
-                  <div key={a.id} className="flex items-center justify-between p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: a.color }} />
-                      <span className="font-medium">{a.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="range" 
-                        min="10" 
-                        max="100" 
-                        step="5"
-                        value={Math.round((a.etp || 0.5) * 100)} 
-                        onChange={(e) => updateETP(a.id, parseInt(e.target.value) / 100)}
-                        className="w-24"
-                      />
-                      <span className="w-12 text-center font-bold" style={{ color: theme.primary }}>{Math.round((a.etp || 0.5) * 100)}%</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <ETPModal 
+          anesthesists={anesthesists.filter(a => a.role !== 'viewer')}
+          onClose={() => setShowETPModal(false)}
+          onSave={async (newETPs) => {
+            for (const [id, etp] of Object.entries(newETPs)) {
+              await supabase.from('anesthesists').update({ etp }).eq('id', parseInt(id));
+            }
+            await loadData();
+            setShowETPModal(false);
+          }}
+          theme={theme}
+        />
       )}
 
       {/* MODAL NOTIFICATIONS */}
