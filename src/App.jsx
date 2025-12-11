@@ -573,12 +573,16 @@ const AnesthesistScheduler = () => {
       }
 
       // Historique
-      await supabase.from('schedule_history').insert({
-        year: today.getFullYear(),
-        generated_by: currentUser?.id,
-        schedule_data: { count: inserts.length, mode },
-        is_current: true
-      }).catch(e => console.warn('Historique non sauvé:', e));
+      try {
+        await supabase.from('schedule_history').insert({
+          year: today.getFullYear(),
+          generated_by: currentUser?.id,
+          schedule_data: { count: inserts.length, mode },
+          is_current: true
+        });
+      } catch (e) {
+        console.warn('Historique non sauvé:', e);
+      }
 
       await loadData();
       alert(`✅ Planning généré : ${inserts.length} entrées`);
