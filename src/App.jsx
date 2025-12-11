@@ -391,60 +391,51 @@ const AnesthesistScheduler = () => {
   // ============================================
   // GÉNÉRATION DU PLANNING - SEMAINES COMPLÈTES AVEC ROTATION
   // ============================================
-  const generateSchedule = async (mode = 'new') => {
+  const generateSchedule = async (mode = 'new', rangeStart = null, rangeEnd = null) => {
     if (!isAdmin || isGenerating) return;
     setIsGenerating(true);
     setShowGenerateModal(false);
 
     try {
-      // PÉRIODE : LUNDI PROCHAIN + 18 MOIS
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      // Trouver le prochain lundi
-      let startDate = new Date(today);
-      startDate.setDate(startDate.getDate() + 1);
-      while (startDate.getDay() !== 1) {
-        startDate.setDate(startDate.getDate() + 1);
-      }
+      let startDate, endDate;
       
-      const endDate = new Date(startDate);
-      endDate.setMonth(endDate.getMonth() + 18);
+      if (mode === 'range' && rangeStart && rangeEnd) {
+        // Mode plage : utiliser les dates fournies
+        startDate = new Date(rangeStart);
+        endDate = new Date(rangeEnd);
+        
+        // Ajuster au lundi le plus proche (début de semaine)
+        while (startDate.getDay() !== 1) {
+          startDate.setDate(startDate.getDate() + 1);
+        }
+        // Ajuster au dimanche le plus proche (fin de semaine)
+        while (endDate.getDay() !== 0) {
+          endDate.setDate(endDate.getDate() + 1);
+        }
+      } else {
+        // Mode nouveau : prochain lundi + 18 mois
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() + 1);
+        while (startDate.getDay() !== 1) {
+          startDate.setDate(startDate.getDate() + 1);
+        }
+        endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + 18);
+      }
 
       console.log('=== DÉBUT GÉNÉRATION ===');
+      console.log('Mode:', mode);
       console.log('Du:', formatDateKey(startDate), 'au:', formatDateKey(endDate));
-
-      // Effacer si mode nouveau
-      if (mode === 'new') {
-        const { error: delErr } = await supabase.from('schedule').delete().gte('date', formatDateKey(startDate));
-        if (delErr) console.error('Erreur delete:', delErr);
-        console.log('Ancien planning supprimé');
-      }
-
-      // Dates déjà planifiées (mode compléter)
-      let existingWeeks = new Set();
-      if (mode === 'complete') {
-        const { data } = await supabase.from('schedule').select('date');
-        if (data) {
-          data.forEach(e => {
-            const d = new Date(e.date);
-            const weekKey = `${d.getFullYear()}-W${getWeekNumber(d)}`;
-            existingWeeks.add(weekKey);
-          });
-        }
-      }
-
-      // Calculer tous les jours fériés
-      const holidaySet = new Set();
-      for (let y = startDate.getFullYear(); y <= endDate.getFullYear(); y++) {
-        getHolidaysForYear(y).forEach(h => holidaySet.add(h.date));
-      }
-      console.log('Fériés:', [...holidaySet].slice(0, 5), '...');
 
       // Anesthésistes actifs
       const activeAnesth = anesthesists.filter(a => a.role !== 'viewer');
 
-      // Stats équilibrage - priorité WE et fériés
+      // ============================================
+      // CHARGER LES STATS DU PASSÉ (pour équilibrage)
+      // ============================================
       const stats = {};
       activeAnesth.forEach(a => {
         stats[a.id] = { 
@@ -457,6 +448,43 @@ const AnesthesistScheduler = () => {
           etp: a.etp || 0.5 
         };
       });
+
+      // Charger l'historique AVANT la date de début pour équilibrer
+      const { data: pastSchedule } = await supabase
+        .from('schedule')
+        .select('*')
+        .lt('date', formatDateKey(startDate));
+
+      if (pastSchedule) {
+        console.log(`Chargement de ${pastSchedule.length} entrées passées pour équilibrage`);
+        pastSchedule.forEach(entry => {
+          if (stats[entry.anesthesist_id]) {
+            if (entry.shift === 'astreinte_we') stats[entry.anesthesist_id].we++;
+            else if (entry.shift === 'astreinte_ferie') stats[entry.anesthesist_id].ferie++;
+            else if (entry.shift === 'astreinte') stats[entry.anesthesist_id].astreinte++;
+            else if (entry.shift === 'bloc') stats[entry.anesthesist_id].bloc++;
+            else if (entry.shift === 'consultation') stats[entry.anesthesist_id].consultation++;
+          }
+        });
+        console.log('Stats passées chargées:', stats);
+      }
+
+      // Supprimer les entrées dans la plage à régénérer
+      const { error: delErr } = await supabase
+        .from('schedule')
+        .delete()
+        .gte('date', formatDateKey(startDate))
+        .lte('date', formatDateKey(endDate));
+      
+      if (delErr) console.error('Erreur delete:', delErr);
+      console.log('Anciennes entrées de la plage supprimées');
+
+      // Calculer tous les jours fériés
+      const holidaySet = new Set();
+      for (let y = startDate.getFullYear(); y <= endDate.getFullYear(); y++) {
+        getHolidaysForYear(y).forEach(h => holidaySet.add(h.date));
+      }
+      console.log('Fériés:', [...holidaySet].slice(0, 5), '...');
 
       // Indisponibilités
       const unavailMap = {};
@@ -510,15 +538,10 @@ const AnesthesistScheduler = () => {
       let currentMonday = new Date(startDate);
       
       while (currentMonday <= endDate) {
-        const weekKey = `${currentMonday.getFullYear()}-W${getWeekNumber(currentMonday)}`;
-        
-        if (!existingWeeks.has(weekKey)) {
-          weeks.push({
-            monday: new Date(currentMonday),
-            weekKey
-          });
-        }
-        
+        weeks.push({
+          monday: new Date(currentMonday),
+          weekKey: `${currentMonday.getFullYear()}-W${getWeekNumber(currentMonday)}`
+        });
         currentMonday.setDate(currentMonday.getDate() + 7);
       }
 
@@ -532,6 +555,9 @@ const AnesthesistScheduler = () => {
       for (const week of weeks) {
         const saturday = new Date(week.monday);
         saturday.setDate(saturday.getDate() + 5);
+        
+        // Vérifier que le samedi est dans la plage
+        if (saturday > endDate) continue;
         
         const availForWE = activeAnesth.filter(a => isAvailableForWE(a.id, saturday));
         const picked = pickMinForStat(availForWE, 'we');
@@ -561,6 +587,9 @@ const AnesthesistScheduler = () => {
           d.setDate(d.getDate() + i);
           const dk = formatDateKey(d);
           
+          // Vérifier que le jour est dans la plage
+          if (d < startDate || d > endDate) continue;
+          
           if (holidaySet.has(dk)) {
             const availForFerie = activeAnesth.filter(a => !unavailMap[dk]?.has(a.id));
             const picked = pickMinForStat(availForFerie, 'ferie');
@@ -576,21 +605,9 @@ const AnesthesistScheduler = () => {
       // ============================================
       // ÉTAPE 4: SEMAINES AVEC ROTATION DES POSTES
       // ============================================
-      // 3 personnes par semaine (A, B, C) qui tournent :
-      // 
-      // ROTATION DES POSTES (sur 5 jours) :
-      // Jour 0 (Lun): A=Astr+Bloc, B=Bloc, C=Consult
-      // Jour 1 (Mar): B=Astr+Bloc, C=Bloc, A=Consult
-      // Jour 2 (Mer): C=Astr+Bloc, A=Bloc, B=Consult
-      // Jour 3 (Jeu): A=Astr+Bloc, B=Bloc, C=Consult
-      // Jour 4 (Ven): B=Astr+Bloc, C=Bloc, A=Consult
-      //
-      // Celui d'astreinte vendredi (B) fait le WE
-      
       console.log('Attribution des semaines avec rotation...');
 
       // Pattern de rotation : [qui fait astreinte+bloc, qui fait bloc, qui fait consult]
-      // Index dans le tableau [A=0, B=1, C=2]
       const rotationPattern = [
         [0, 1, 2], // Lundi:    A=astr+bloc, B=bloc, C=consult
         [1, 2, 0], // Mardi:    B=astr+bloc, C=bloc, A=consult
@@ -600,7 +617,6 @@ const AnesthesistScheduler = () => {
       ];
       
       for (const week of weeks) {
-        // Trouver 3 personnes disponibles toute la semaine
         const availForWeek = activeAnesth.filter(a => isAvailableForWeek(a.id, week.monday));
         
         if (availForWeek.length < 3) {
@@ -608,23 +624,20 @@ const AnesthesistScheduler = () => {
           continue;
         }
 
-        // Celui qui fait le WE doit être en position B (astreinte vendredi)
-        // On le met en priorité s'il est disponible toute la semaine
         const weekTeam = [];
         const wePersonId = week.weAssigned;
         const wePerson = wePersonId ? availForWeek.find(a => a.id === wePersonId) : null;
         
-        // Sélectionner les 3 personnes
         const remaining = availForWeek.filter(a => a.id !== wePersonId);
         
-        // Position A (astreinte lundi, jeudi)
+        // Position A
         const personA = pickMinForStat(remaining, 'semaines');
         if (personA) {
           weekTeam[0] = personA;
           stats[personA.id].semaines++;
         }
         
-        // Position B (astreinte mardi, vendredi = fait le WE)
+        // Position B (fait le WE)
         if (wePerson) {
           weekTeam[1] = wePerson;
           stats[wePerson.id].semaines++;
@@ -636,14 +649,13 @@ const AnesthesistScheduler = () => {
           }
         }
         
-        // Position C (astreinte mercredi)
+        // Position C
         const personC = pickMinForStat(remaining.filter(a => a.id !== personA?.id && a.id !== weekTeam[1]?.id), 'semaines');
         if (personC) {
           weekTeam[2] = personC;
           stats[personC.id].semaines++;
         }
 
-        // Vérifier qu'on a bien 3 personnes
         if (!weekTeam[0] || !weekTeam[1] || !weekTeam[2]) {
           console.warn(`Semaine ${week.weekKey}: équipe incomplète`);
           continue;
@@ -651,11 +663,13 @@ const AnesthesistScheduler = () => {
 
         console.log(`Semaine ${week.weekKey}: ${weekTeam.map(p => p.name.split(' ')[1]).join(', ')}`);
 
-        // Générer les entrées pour chaque jour ouvré
         for (let dayIndex = 0; dayIndex < 5; dayIndex++) {
           const d = new Date(week.monday);
           d.setDate(d.getDate() + dayIndex);
           const dk = formatDateKey(d);
+          
+          // Vérifier que le jour est dans la plage
+          if (d < startDate || d > endDate) continue;
           
           // Skip si jour férié
           if (holidaySet.has(dk)) continue;
@@ -701,7 +715,7 @@ const AnesthesistScheduler = () => {
         await supabase.from('schedule_history').insert({
           year: today.getFullYear(),
           generated_by: currentUser?.id,
-          schedule_data: { count: inserts.length, mode, stats },
+          schedule_data: { count: inserts.length, mode, stats, range: mode === 'range' ? { start: rangeStart, end: rangeEnd } : null },
           is_current: true
         });
       } catch (e) {
@@ -709,7 +723,11 @@ const AnesthesistScheduler = () => {
       }
 
       await loadData();
-      alert(`✅ Planning généré : ${inserts.length} entrées\n\n• WE et fériés équilibrés\n• Semaines complètes avec rotation des postes`);
+      
+      const modeLabel = mode === 'range' 
+        ? `Plage du ${new Date(rangeStart).toLocaleDateString('fr-FR')} au ${new Date(rangeEnd).toLocaleDateString('fr-FR')}`
+        : 'Planning intégral 18 mois';
+      alert(`✅ ${modeLabel}\n\n${inserts.length} entrées générées\n\n• WE et fériés équilibrés (historique pris en compte)\n• Semaines complètes avec rotation des postes`);
 
     } catch (err) {
       console.error('ERREUR GÉNÉRATION:', err);
@@ -1438,18 +1456,18 @@ const AnesthesistScheduler = () => {
       {/* MODAL GÉNÉRATION */}
       {showGenerateModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">Générer le planning</h2>
               <button onClick={() => setShowGenerateModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6">
               <p className="text-sm mb-6" style={{ color: theme.gray[600] }}>
-                Le planning sera généré sur <strong>18 mois</strong> à partir de demain.<br/>
-                <span className="text-xs">Règles appliquées : celui d'astreinte = au bloc, astreinte veille WE/férié = astreinte WE/férié</span>
+                Règles appliquées : semaines complètes avec rotation des postes, équilibrage WE/fériés, celui d'astreinte vendredi = astreinte WE.
               </p>
               
-              <div className="space-y-3 mb-6">
+              <div className="space-y-4">
+                {/* Option 1: Nouveau planning intégral */}
                 <button
                   onClick={() => generateSchedule('new')}
                   disabled={isGenerating}
@@ -1458,29 +1476,66 @@ const AnesthesistScheduler = () => {
                   <div className="flex items-center gap-3">
                     <RefreshCw className="w-6 h-6" style={{ color: theme.danger }} />
                     <div>
-                      <p className="font-bold">Nouveau planning</p>
-                      <p className="text-sm" style={{ color: theme.gray[500] }}>Efface tout et régénère entièrement</p>
+                      <p className="font-bold">Nouveau planning intégral</p>
+                      <p className="text-sm" style={{ color: theme.gray[500] }}>Efface tout à partir d'aujourd'hui et régénère sur 18 mois</p>
                     </div>
                   </div>
                 </button>
                 
-                <button
-                  onClick={() => generateSchedule('complete')}
-                  disabled={isGenerating}
-                  className="w-full p-4 rounded-xl border-2 text-left hover:border-blue-500 transition-colors disabled:opacity-50"
-                >
-                  <div className="flex items-center gap-3">
-                    <PlusCircle className="w-6 h-6" style={{ color: theme.success }} />
+                {/* Option 2: Plage de dates */}
+                <div className="p-4 rounded-xl border-2">
+                  <div className="flex items-center gap-3 mb-4">
+                    <Calendar className="w-6 h-6" style={{ color: theme.accent }} />
                     <div>
-                      <p className="font-bold">Compléter le planning</p>
-                      <p className="text-sm" style={{ color: theme.gray[500] }}>Garde l'existant, ajoute les jours manquants</p>
+                      <p className="font-bold">Générer une plage spécifique</p>
+                      <p className="text-sm" style={{ color: theme.gray[500] }}>Régénère uniquement la période sélectionnée (équilibre basé sur l'historique)</p>
                     </div>
                   </div>
-                </button>
+                  
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Date début</label>
+                      <input 
+                        type="date" 
+                        id="genStartDate"
+                        min={formatDateKey(new Date())}
+                        max={formatDateKey(new Date(new Date().setMonth(new Date().getMonth() + 18)))}
+                        defaultValue={formatDateKey(new Date())}
+                        className="w-full px-3 py-2 border rounded-xl text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Date fin</label>
+                      <input 
+                        type="date" 
+                        id="genEndDate"
+                        min={formatDateKey(new Date())}
+                        max={formatDateKey(new Date(new Date().setMonth(new Date().getMonth() + 18)))}
+                        defaultValue={formatDateKey(new Date(new Date().setMonth(new Date().getMonth() + 3)))}
+                        className="w-full px-3 py-2 border rounded-xl text-sm"
+                      />
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      const startInput = document.getElementById('genStartDate');
+                      const endInput = document.getElementById('genEndDate');
+                      if (startInput && endInput) {
+                        generateSchedule('range', startInput.value, endInput.value);
+                      }
+                    }}
+                    disabled={isGenerating}
+                    className="w-full py-2 text-white rounded-xl font-medium disabled:opacity-50"
+                    style={{ backgroundColor: theme.accent }}
+                  >
+                    Générer cette plage
+                  </button>
+                </div>
               </div>
 
               {isGenerating && (
-                <div className="flex items-center justify-center gap-2 text-sm" style={{ color: theme.gray[500] }}>
+                <div className="flex items-center justify-center gap-2 text-sm mt-4" style={{ color: theme.gray[500] }}>
                   <RefreshCw className="w-4 h-4 animate-spin" />
                   Génération en cours...
                 </div>
