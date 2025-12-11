@@ -5,8 +5,8 @@ import { Calendar, Users, RefreshCw, Download, Play, TrendingUp, AlertTriangle, 
 // ============================================
 // CONFIGURATION SUPABASE
 // ============================================
-const SUPABASE_URL = 'https://xxxx.supabase.co'; // À REMPLACER
-const SUPABASE_ANON_KEY = 'xxxx'; // À REMPLACER
+const SUPABASE_URL = 'https://vqlieplrtrvqcvllhmob.supabase.co'; // À REMPLACER
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxbGllcGxydHJ2cWN2bGxobW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzMDA4MzMsImV4cCI6MjA4MDg3NjgzM30.BcK8sDePzCwSC3BMSRLagdZUQhevdRIrNshLsP1MgW8'; // À REMPLACER
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================
