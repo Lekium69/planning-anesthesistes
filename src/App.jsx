@@ -382,7 +382,7 @@ const AnesthesistScheduler = () => {
     return false;
   };
   // ============================================
-  // GÉNÉRATION DU PLANNING - VERSION CORRIGÉE
+  // GÉNÉRATION DU PLANNING - VERSION SIMPLIFIÉE
   // ============================================
   const generateSchedule = async (mode = 'new') => {
     if (!isAdmin || isGenerating) return;
@@ -390,265 +390,202 @@ const AnesthesistScheduler = () => {
     setShowGenerateModal(false);
 
     try {
-      // ============================================
-      // PÉRIODE : AUJOURD'HUI + 18 MOIS (FUTUR UNIQUEMENT)
-      // ============================================
+      // PÉRIODE : DEMAIN + 18 MOIS
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
       const startDate = new Date(today);
-      startDate.setDate(startDate.getDate() + 1); // Commencer demain
+      startDate.setDate(startDate.getDate() + 1);
       
       const endDate = new Date(today);
       endDate.setMonth(endDate.getMonth() + 18);
 
-      console.log(`Génération du ${formatDateKey(startDate)} au ${formatDateKey(endDate)}`);
+      console.log('=== DÉBUT GÉNÉRATION ===');
+      console.log('Du:', formatDateKey(startDate), 'au:', formatDateKey(endDate));
 
-      // Si mode "nouveau", on efface tout à partir de demain
+      // Effacer si mode nouveau
       if (mode === 'new') {
-        const startKey = formatDateKey(startDate);
-        const { error: deleteError } = await supabase.from('schedule').delete().gte('date', startKey);
-        if (deleteError) console.error('Erreur suppression:', deleteError);
+        const { error: delErr } = await supabase.from('schedule').delete().gte('date', formatDateKey(startDate));
+        if (delErr) console.error('Erreur delete:', delErr);
+        console.log('Ancien planning supprimé');
       }
 
-      // Récupérer les dates déjà planifiées (pour mode "compléter")
+      // Dates déjà planifiées (mode compléter)
       let existingDates = new Set();
       if (mode === 'complete') {
-        const { data: existing } = await supabase.from('schedule').select('date');
-        if (existing) {
-          existingDates = new Set(existing.map(e => e.date));
-        }
+        const { data } = await supabase.from('schedule').select('date');
+        if (data) existingDates = new Set(data.map(e => e.date));
       }
 
-      // Récupérer tous les jours fériés pour la période
-      const allHolidays = getAllHolidaysForPeriod(startDate, endDate);
-      const holidayDates = new Set(allHolidays.map(h => h.date));
-      
-      console.log('Jours fériés trouvés:', allHolidays.map(h => `${h.date}: ${h.name}`));
+      // Calculer tous les jours fériés
+      const holidaySet = new Set();
+      for (let y = startDate.getFullYear(); y <= endDate.getFullYear(); y++) {
+        getHolidaysForYear(y).forEach(h => holidaySet.add(h.date));
+      }
+      console.log('Fériés:', [...holidaySet].slice(0, 5), '...');
 
-      // ============================================
-      // STATS POUR ÉQUILIBRAGE AVEC ETP
-      // ============================================
+      // Stats équilibrage simple
       const stats = {};
-      anesthesists.forEach(a => { 
-        const etp = a.etp || 0.5; // Par défaut 50%
-        stats[a.id] = { 
-          we: 0, 
-          ferie: 0, 
-          astreinte: 0, 
-          bloc: 0, 
-          consultation: 0,
-          total: 0,
-          etp: etp,
-          // Score pondéré par ETP (plus l'ETP est élevé, plus on doit travailler)
-          getWeightedScore: function(type) {
-            return this[type] / this.etp;
-          }
-        }; 
+      const activeAnesth = anesthesists.filter(a => a.role !== 'viewer');
+      activeAnesth.forEach(a => {
+        stats[a.id] = { astreinte: 0, bloc: 0, consultation: 0, we: 0, ferie: 0, etp: a.etp || 0.5 };
       });
 
-      // Collecter les indisponibilités
-      const unavailDates = {};
+      // Indisponibilités
+      const unavailMap = {};
       unavailabilities.forEach(u => {
-        let current = new Date(u.date_start);
+        let d = new Date(u.date_start);
         const end = new Date(u.date_end);
-        while (current <= end) {
-          const key = formatDateKey(current);
-          if (!unavailDates[key]) unavailDates[key] = new Set();
-          unavailDates[key].add(u.anesthesist_id);
-          current.setDate(current.getDate() + 1);
+        while (d <= end) {
+          const k = formatDateKey(d);
+          if (!unavailMap[k]) unavailMap[k] = new Set();
+          unavailMap[k].add(u.anesthesist_id);
+          d.setDate(d.getDate() + 1);
         }
       });
 
-      const getAvailable = (dateKey) => {
-        const unavail = unavailDates[dateKey] || new Set();
-        return anesthesists.filter(a => !unavail.has(a.id) && a.role !== 'viewer');
-      };
-
-      // Sélectionner celui avec le moins de gardes pondéré par ETP
-      const pickBest = (available, statKey) => {
-        if (available.length === 0) return null;
-        const sorted = [...available].sort((a, b) => {
-          const scoreA = stats[a.id].getWeightedScore(statKey);
-          const scoreB = stats[b.id].getWeightedScore(statKey);
-          return scoreA - scoreB;
+      // Fonctions helper
+      const getAvail = (dk) => activeAnesth.filter(a => !(unavailMap[dk]?.has(a.id)));
+      
+      const pickMin = (list, key) => {
+        if (!list.length) return null;
+        return list.reduce((best, curr) => {
+          const scoreBest = stats[best.id][key] / stats[best.id].etp;
+          const scoreCurr = stats[curr.id][key] / stats[curr.id].etp;
+          return scoreCurr < scoreBest ? curr : best;
         });
-        return sorted[0];
       };
 
       const inserts = [];
+      let d = new Date(startDate);
+      let lastWeekdayAstreinte = null; // Pour tracker l'astreinte de la veille
 
-      // ============================================
-      // PARCOURIR CHAQUE JOUR
-      // ============================================
-      let current = new Date(startDate);
-      
-      while (current <= endDate) {
-        const dateKey = formatDateKey(current);
-        const dayOfWeek = current.getDay();
-        const isWE = dayOfWeek === 0 || dayOfWeek === 6;
-        const isHol = holidayDates.has(dateKey);
-        const isFri = dayOfWeek === 5;
-        
-        // Vérifier si c'est la veille d'un WE ou d'un férié
-        const nextDay = new Date(current);
-        nextDay.setDate(nextDay.getDate() + 1);
-        const nextDayKey = formatDateKey(nextDay);
-        const isNextDayWE = nextDay.getDay() === 6 || nextDay.getDay() === 0;
-        const isNextDayHoliday = holidayDates.has(nextDayKey) && !isWeekend(nextDay);
-        const isEveOfSpecial = isFri || isNextDayHoliday;
-        
+      while (d <= endDate) {
+        const dk = formatDateKey(d);
+        const dow = d.getDay(); // 0=dim, 6=sam
+        const isSat = dow === 6;
+        const isSun = dow === 0;
+        const isWE = isSat || isSun;
+        const isFerie = holidaySet.has(dk) && !isWE;
+        const isWorkday = dow >= 1 && dow <= 5 && !holidaySet.has(dk);
+
         // Skip si déjà planifié
-        if (existingDates.has(dateKey)) {
-          current.setDate(current.getDate() + 1);
+        if (existingDates.has(dk)) {
+          d.setDate(d.getDate() + 1);
           continue;
         }
 
-        const available = getAvailable(dateKey);
+        const avail = getAvail(dk);
 
-        // ============================================
-        // CAS 1: SAMEDI (début de WE)
-        // ============================================
-        if (dayOfWeek === 6) {
-          // L'astreinte du WE est celle du vendredi soir
-          // On cherche qui était d'astreinte vendredi
-          const friday = new Date(current);
-          friday.setDate(friday.getDate() - 1);
-          const fridayKey = formatDateKey(friday);
-          
-          // Récupérer l'astreinte du vendredi dans les inserts
-          const fridayAstreinte = inserts.find(i => i.date === fridayKey && i.shift === 'astreinte');
-          
-          if (fridayAstreinte) {
-            // Même personne pour samedi et dimanche
-            inserts.push({ date: dateKey, shift: 'astreinte_we', anesthesist_id: fridayAstreinte.anesthesist_id, year: current.getFullYear() });
-            
-            const sunday = new Date(current);
-            sunday.setDate(sunday.getDate() + 1);
-            const sundayKey = formatDateKey(sunday);
-            inserts.push({ date: sundayKey, shift: 'astreinte_we', anesthesist_id: fridayAstreinte.anesthesist_id, year: sunday.getFullYear() });
-            
-            stats[fridayAstreinte.anesthesist_id].we++;
-          } else {
-            // Pas d'astreinte vendredi trouvée, prendre quelqu'un
-            const picked = pickBest(available, 'we');
-            if (picked) {
-              inserts.push({ date: dateKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: current.getFullYear() });
-              const sunday = new Date(current);
-              sunday.setDate(sunday.getDate() + 1);
-              const sundayKey = formatDateKey(sunday);
-              inserts.push({ date: sundayKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: sunday.getFullYear() });
-              stats[picked.id].we++;
-            }
+        // ========== SAMEDI ==========
+        if (isSat) {
+          // Astreinte WE = astreinte du vendredi (lastWeekdayAstreinte)
+          let weAstreinte = lastWeekdayAstreinte;
+          if (!weAstreinte || !avail.find(a => a.id === weAstreinte)) {
+            const picked = pickMin(avail, 'we');
+            weAstreinte = picked?.id;
           }
-          // Sauter au lundi (on a traité sam+dim)
-          current.setDate(current.getDate() + 2);
+          
+          if (weAstreinte) {
+            // Samedi
+            inserts.push({ date: dk, shift: 'astreinte_we', anesthesist_id: weAstreinte, year: d.getFullYear() });
+            // Dimanche
+            const sun = new Date(d);
+            sun.setDate(sun.getDate() + 1);
+            inserts.push({ date: formatDateKey(sun), shift: 'astreinte_we', anesthesist_id: weAstreinte, year: sun.getFullYear() });
+            stats[weAstreinte].we++;
+          }
+          // Sauter au lundi
+          d.setDate(d.getDate() + 2);
+          lastWeekdayAstreinte = null;
           continue;
         }
 
-        // ============================================
-        // CAS 2: DIMANCHE (déjà traité avec samedi)
-        // ============================================
-        if (dayOfWeek === 0) {
-          current.setDate(current.getDate() + 1);
+        // ========== DIMANCHE (déjà traité) ==========
+        if (isSun) {
+          d.setDate(d.getDate() + 1);
           continue;
         }
 
-        // ============================================
-        // CAS 3: JOUR FÉRIÉ (semaine)
-        // ============================================
-        if (isHol && !isWE) {
-          // L'astreinte du férié est celle de la veille
-          const yesterday = new Date(current);
-          yesterday.setDate(yesterday.getDate() - 1);
-          const yesterdayKey = formatDateKey(yesterday);
-          
-          const yesterdayAstreinte = inserts.find(i => i.date === yesterdayKey && i.shift === 'astreinte');
-          
-          if (yesterdayAstreinte) {
-            inserts.push({ date: dateKey, shift: 'astreinte_ferie', anesthesist_id: yesterdayAstreinte.anesthesist_id, year: current.getFullYear() });
-            stats[yesterdayAstreinte.anesthesist_id].ferie++;
-          } else {
-            const picked = pickBest(available, 'ferie');
-            if (picked) {
-              inserts.push({ date: dateKey, shift: 'astreinte_ferie', anesthesist_id: picked.id, year: current.getFullYear() });
-              stats[picked.id].ferie++;
-            }
+        // ========== JOUR FÉRIÉ (en semaine) ==========
+        if (isFerie) {
+          // Astreinte férié = astreinte de la veille
+          let ferieAstreinte = lastWeekdayAstreinte;
+          if (!ferieAstreinte || !avail.find(a => a.id === ferieAstreinte)) {
+            const picked = pickMin(avail, 'ferie');
+            ferieAstreinte = picked?.id;
           }
-          current.setDate(current.getDate() + 1);
+          
+          if (ferieAstreinte) {
+            inserts.push({ date: dk, shift: 'astreinte_ferie', anesthesist_id: ferieAstreinte, year: d.getFullYear() });
+            stats[ferieAstreinte].ferie++;
+          }
+          d.setDate(d.getDate() + 1);
+          lastWeekdayAstreinte = null;
           continue;
         }
 
-        // ============================================
-        // CAS 4: JOUR DE SEMAINE NORMAL
-        // ============================================
-        if (dayOfWeek >= 1 && dayOfWeek <= 5 && !isHol) {
-          const alreadyAssigned = new Set();
+        // ========== JOUR OUVRÉ ==========
+        if (isWorkday) {
+          const assigned = new Set();
 
-          // 1. ASTREINTE (1 personne) - sera aussi au bloc
-          const astrAvail = available.filter(a => !alreadyAssigned.has(a.id));
-          const astrPicked = pickBest(astrAvail, 'astreinte');
-          
-          if (astrPicked) {
-            // Astreinte
-            inserts.push({ date: dateKey, shift: 'astreinte', anesthesist_id: astrPicked.id, year: current.getFullYear() });
-            stats[astrPicked.id].astreinte++;
-            
-            // Celui d'astreinte est aussi au bloc
-            inserts.push({ date: dateKey, shift: 'bloc', anesthesist_id: astrPicked.id, year: current.getFullYear() });
-            stats[astrPicked.id].bloc++;
-            alreadyAssigned.add(astrPicked.id);
+          // 1. ASTREINTE (aussi au bloc)
+          const astrPick = pickMin(avail.filter(a => !assigned.has(a.id)), 'astreinte');
+          if (astrPick) {
+            inserts.push({ date: dk, shift: 'astreinte', anesthesist_id: astrPick.id, year: d.getFullYear() });
+            inserts.push({ date: dk, shift: 'bloc', anesthesist_id: astrPick.id, year: d.getFullYear() });
+            stats[astrPick.id].astreinte++;
+            stats[astrPick.id].bloc++;
+            assigned.add(astrPick.id);
+            lastWeekdayAstreinte = astrPick.id; // Mémoriser pour WE/férié
           }
 
-          // 2. BLOC - 2ème personne (1 de plus, total 2 au bloc)
-          const blocAvail = available.filter(a => !alreadyAssigned.has(a.id));
-          const blocPicked = pickBest(blocAvail, 'bloc');
-          
-          if (blocPicked) {
-            inserts.push({ date: dateKey, shift: 'bloc', anesthesist_id: blocPicked.id, year: current.getFullYear() });
-            stats[blocPicked.id].bloc++;
-            alreadyAssigned.add(blocPicked.id);
+          // 2. 2ème BLOC
+          const bloc2Pick = pickMin(avail.filter(a => !assigned.has(a.id)), 'bloc');
+          if (bloc2Pick) {
+            inserts.push({ date: dk, shift: 'bloc', anesthesist_id: bloc2Pick.id, year: d.getFullYear() });
+            stats[bloc2Pick.id].bloc++;
+            assigned.add(bloc2Pick.id);
           }
 
-          // 3. CONSULTATION (1 personne, différente des autres)
-          const consAvail = available.filter(a => !alreadyAssigned.has(a.id));
-          const consPicked = pickBest(consAvail, 'consultation');
-          
-          if (consPicked) {
-            inserts.push({ date: dateKey, shift: 'consultation', anesthesist_id: consPicked.id, year: current.getFullYear() });
-            stats[consPicked.id].consultation++;
+          // 3. CONSULTATION
+          const consPick = pickMin(avail.filter(a => !assigned.has(a.id)), 'consultation');
+          if (consPick) {
+            inserts.push({ date: dk, shift: 'consultation', anesthesist_id: consPick.id, year: d.getFullYear() });
+            stats[consPick.id].consultation++;
           }
         }
 
-        current.setDate(current.getDate() + 1);
+        d.setDate(d.getDate() + 1);
       }
 
-      console.log(`Génération terminée: ${inserts.length} entrées à insérer`);
+      console.log('Entrées générées:', inserts.length);
 
-      // Insérer par batch de 500
+      // Insérer par batch
       for (let i = 0; i < inserts.length; i += 500) {
         const batch = inserts.slice(i, i + 500);
         const { error } = await supabase.from('schedule').insert(batch);
         if (error) {
-          console.error('Erreur insertion batch:', error);
+          console.error('Erreur batch', i, ':', error);
+          throw error;
         }
+        console.log('Batch', i/500 + 1, 'inséré');
       }
 
-      // Sauvegarder dans l'historique
+      // Historique
       await supabase.from('schedule_history').insert({
         year: today.getFullYear(),
-        generated_by: currentUser.id,
-        schedule_data: { count: inserts.length, mode, start: formatDateKey(startDate), end: formatDateKey(endDate) },
+        generated_by: currentUser?.id,
+        schedule_data: { count: inserts.length, mode },
         is_current: true
-      });
+      }).catch(e => console.warn('Historique non sauvé:', e));
 
-      // Recharger les données
       await loadData();
-      alert(`Planning généré avec succès ! ${inserts.length} entrées créées.`);
+      alert(`✅ Planning généré : ${inserts.length} entrées`);
 
-    } catch (error) {
-      console.error('Erreur génération:', error);
-      alert('Erreur lors de la génération du planning: ' + error.message);
+    } catch (err) {
+      console.error('ERREUR GÉNÉRATION:', err);
+      alert('Erreur: ' + (err.message || err));
     } finally {
       setIsGenerating(false);
     }
