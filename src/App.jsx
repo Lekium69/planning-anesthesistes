@@ -1093,14 +1093,32 @@ const AnesthesistScheduler = () => {
                   {anesthesists.filter(a => a.role !== 'viewer').map(a => (
                     <button 
                       key={a.id} 
-                      onClick={() => { const f = new Set(selectedFilters); f.has(a.id) ? f.delete(a.id) : f.add(a.id); setSelectedFilters(f); }}
+                      onClick={() => { 
+                        // Si tous sont sélectionnés, on sélectionne uniquement celui cliqué
+                        // Sinon, on ajoute/retire de la sélection
+                        const allSelected = selectedFilters.size === anesthesists.filter(x => x.role !== 'viewer').length;
+                        if (allSelected) {
+                          setSelectedFilters(new Set([a.id]));
+                        } else if (selectedFilters.has(a.id) && selectedFilters.size === 1) {
+                          // Si c'est le dernier sélectionné, remettre tous
+                          setSelectedFilters(new Set(anesthesists.filter(x => x.role !== 'viewer').map(x => x.id)));
+                        } else if (selectedFilters.has(a.id)) {
+                          const f = new Set(selectedFilters);
+                          f.delete(a.id);
+                          setSelectedFilters(f);
+                        } else {
+                          const f = new Set(selectedFilters);
+                          f.add(a.id);
+                          setSelectedFilters(f);
+                        }
+                      }}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selectedFilters.has(a.id) ? 'text-white' : ''} ${a.id === currentUser?.id ? 'ring-2 ring-offset-1 ring-yellow-400' : ''}`}
                       style={selectedFilters.has(a.id) ? { backgroundColor: a.color, borderColor: a.color } : { borderColor: theme.gray[200], color: theme.gray[400] }}
                     >
                       {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]} {a.id === currentUser?.id && '(moi)'}
                     </button>
                   ))}
-                  <button onClick={() => setSelectedFilters(new Set(anesthesists.map(a => a.id)))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+                  <button onClick={() => setSelectedFilters(new Set(anesthesists.filter(a => a.role !== 'viewer').map(a => a.id)))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
                 </div>
               </div>
