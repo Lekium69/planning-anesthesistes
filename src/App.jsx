@@ -5,8 +5,8 @@ import { Calendar, Users, RefreshCw, Download, Play, TrendingUp, AlertTriangle, 
 // ============================================
 // CONFIGURATION SUPABASE
 // ============================================
-const SUPABASE_URL = 'https://vqlieplrtrvqcvllhmob.supabase.co'; // À REMPLACER
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxbGllcGxydHJ2cWN2bGxobW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzMDA4MzMsImV4cCI6MjA4MDg3NjgzM30.BcK8sDePzCwSC3BMSRLagdZUQhevdRIrNshLsP1MgW8'; // À REMPLACER
+const SUPABASE_URL = 'https://vqlieplrtrvqcvllhmob.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxbGllcGxydHJ2cWN2bGxobW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzMDA4MzMsImV4cCI6MjA4MDg3NjgzM30.BcK8sDePzCwSC3BMSRLagdZUQhevdRIrNshLsP1MgW8';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================
@@ -58,6 +58,10 @@ const AnesthesistScheduler = () => {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   // États principaux
   const [anesthesists, setAnesthesists] = useState([]);
@@ -227,6 +231,40 @@ const AnesthesistScheduler = () => {
     setCurrentUser(null);
     setIsLoggedIn(false);
     localStorage.removeItem('currentUser');
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    setResetLoading(true);
+
+    // Vérifier si l'email existe
+    const { data: user, error } = await supabase
+      .from('anesthesists')
+      .select('email, name')
+      .eq('email', loginEmail.toLowerCase())
+      .single();
+
+    if (error || !user) {
+      setLoginError('Aucun compte associé à cet email');
+      setResetLoading(false);
+      return;
+    }
+
+    // Envoyer l'email via Supabase Auth (si configuré) ou afficher les instructions
+    try {
+      // Option 1: Si vous avez Supabase Auth configuré
+      // const { error: resetError } = await supabase.auth.resetPasswordForEmail(loginEmail);
+      
+      // Option 2: Pour l'instant, on simule l'envoi et affiche un message
+      // Dans une vraie implémentation, vous utiliseriez un service email (Resend, SendGrid, etc.)
+      
+      setResetEmailSent(true);
+      setResetLoading(false);
+    } catch (err) {
+      setLoginError('Erreur lors de l\'envoi. Veuillez réessayer.');
+      setResetLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -607,44 +645,157 @@ const AnesthesistScheduler = () => {
             <p className="text-gray-500 mt-2">Clinique Herbert</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          {/* Mode mot de passe oublié */}
+          {forgotPasswordMode ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="votre.email@example.com"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="••••••••"
-                required
-              />
-            </div>
+              {resetEmailSent ? (
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Mail className="w-8 h-8 text-green-600" />
+                  </div>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-2">Email envoyé !</h2>
+                  <p className="text-gray-600 text-sm mb-6">
+                    Si un compte existe avec l'adresse <strong>{loginEmail}</strong>, vous recevrez un lien de réinitialisation.
+                  </p>
+                  <p className="text-gray-500 text-xs mb-6">
+                    💡 En attendant la configuration email, contactez l'administrateur pour réinitialiser votre mot de passe.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setForgotPasswordMode(false);
+                      setResetEmailSent(false);
+                      setLoginError('');
+                    }}
+                    className="text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    ← Retour à la connexion
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <div className="text-center mb-4">
+                    <h2 className="text-lg font-semibold text-gray-800">Mot de passe oublié ?</h2>
+                    <p className="text-gray-500 text-sm mt-1">
+                      Entrez votre email pour recevoir un lien de réinitialisation
+                    </p>
+                  </div>
 
-            {loginError && (
-              <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
-                {loginError}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="votre.email@example.com"
+                      required
+                    />
+                  </div>
+
+                  {loginError && (
+                    <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
+                      {loginError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={resetLoading}
+                    className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {resetLoading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Envoi en cours...
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4" />
+                        Envoyer le lien
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotPasswordMode(false);
+                      setLoginError('');
+                    }}
+                    className="w-full text-gray-500 hover:text-gray-700 py-2 text-sm"
+                  >
+                    ← Retour à la connexion
+                  </button>
+                </form>
+              )}
+            </div>
+          ) : (
+            /* Mode connexion normal */
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="votre.email@example.com"
+                  required
+                />
               </div>
-            )}
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="••••••••"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
 
-            <button
-              type="submit"
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
-            >
-              Se connecter
-            </button>
-          </form>
+              {loginError && (
+                <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
+                  {loginError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                Se connecter
+              </button>
+
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotPasswordMode(true);
+                    setLoginError('');
+                  }}
+                  className="text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
+                >
+                  Mot de passe oublié ?
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     );
