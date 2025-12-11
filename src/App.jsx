@@ -389,7 +389,10 @@ const AnesthesistScheduler = () => {
     return false;
   };
   // ============================================
-  // GÉNÉRATION DU PLANNING - SEMAINES COMPLÈTES AVEC ROTATION
+  // GÉNÉRATION DU PLANNING
+  // Priorité 1: Semaines entières (3 personnes fixes par semaine)
+  // Priorité 2: Astreinte WE/férié = astreinte de la veille/vendredi
+  // Priorité 3: Équilibrer WE puis fériés
   // ============================================
   const generateSchedule = async (mode = 'new', rangeStart = null, rangeEnd = null) => {
     if (!isAdmin || isGenerating) return;
@@ -403,20 +406,17 @@ const AnesthesistScheduler = () => {
       let startDate, endDate;
       
       if (mode === 'range' && rangeStart && rangeEnd) {
-        // Mode plage : utiliser les dates fournies
         startDate = new Date(rangeStart);
         endDate = new Date(rangeEnd);
-        
-        // Ajuster au lundi le plus proche (début de semaine)
+        // Ajuster au lundi
         while (startDate.getDay() !== 1) {
           startDate.setDate(startDate.getDate() + 1);
         }
-        // Ajuster au dimanche le plus proche (fin de semaine)
+        // Ajuster au dimanche
         while (endDate.getDay() !== 0) {
           endDate.setDate(endDate.getDate() + 1);
         }
       } else {
-        // Mode nouveau : prochain lundi + 18 mois
         startDate = new Date(today);
         startDate.setDate(startDate.getDate() + 1);
         while (startDate.getDay() !== 1) {
@@ -432,9 +432,14 @@ const AnesthesistScheduler = () => {
 
       // Anesthésistes actifs
       const activeAnesth = anesthesists.filter(a => a.role !== 'viewer');
+      
+      if (activeAnesth.length < 3) {
+        alert('Il faut au moins 3 anesthésistes actifs pour générer le planning');
+        return;
+      }
 
       // ============================================
-      // CHARGER LES STATS DU PASSÉ (pour équilibrage)
+      // CHARGER LES STATS DU PASSÉ (Priorité 3: équilibrage)
       // ============================================
       const stats = {};
       activeAnesth.forEach(a => {
@@ -442,14 +447,10 @@ const AnesthesistScheduler = () => {
           semaines: 0, 
           we: 0, 
           ferie: 0, 
-          astreinte: 0, 
-          bloc: 0, 
-          consultation: 0, 
           etp: a.etp || 0.5 
         };
       });
 
-      // Charger l'historique AVANT la date de début pour équilibrer
       const { data: pastSchedule } = await supabase
         .from('schedule')
         .select('*')
@@ -457,19 +458,23 @@ const AnesthesistScheduler = () => {
 
       if (pastSchedule) {
         console.log(`Chargement de ${pastSchedule.length} entrées passées pour équilibrage`);
+        const countedWE = new Set(); // Pour ne pas compter 2x sam+dim
         pastSchedule.forEach(entry => {
           if (stats[entry.anesthesist_id]) {
-            if (entry.shift === 'astreinte_we') stats[entry.anesthesist_id].we++;
+            if (entry.shift === 'astreinte_we') {
+              const weKey = `${entry.date}-${entry.anesthesist_id}`;
+              if (!countedWE.has(weKey.substring(0, 10))) {
+                stats[entry.anesthesist_id].we++;
+                countedWE.add(entry.date.substring(0, 10));
+              }
+            }
             else if (entry.shift === 'astreinte_ferie') stats[entry.anesthesist_id].ferie++;
-            else if (entry.shift === 'astreinte') stats[entry.anesthesist_id].astreinte++;
-            else if (entry.shift === 'bloc') stats[entry.anesthesist_id].bloc++;
-            else if (entry.shift === 'consultation') stats[entry.anesthesist_id].consultation++;
           }
         });
-        console.log('Stats passées chargées:', stats);
+        console.log('Stats WE/fériés passés:', Object.entries(stats).map(([id, s]) => `${id}: WE=${s.we}, Fériés=${s.ferie}`));
       }
 
-      // Supprimer les entrées dans la plage à régénérer
+      // Supprimer les entrées dans la plage
       const { error: delErr } = await supabase
         .from('schedule')
         .delete()
@@ -477,14 +482,12 @@ const AnesthesistScheduler = () => {
         .lte('date', formatDateKey(endDate));
       
       if (delErr) console.error('Erreur delete:', delErr);
-      console.log('Anciennes entrées de la plage supprimées');
 
-      // Calculer tous les jours fériés
+      // Jours fériés
       const holidaySet = new Set();
       for (let y = startDate.getFullYear(); y <= endDate.getFullYear(); y++) {
         getHolidaysForYear(y).forEach(h => holidaySet.add(h.date));
       }
-      console.log('Fériés:', [...holidaySet].slice(0, 5), '...');
 
       // Indisponibilités
       const unavailMap = {};
@@ -499,9 +502,9 @@ const AnesthesistScheduler = () => {
         }
       });
 
-      // Vérifier disponibilité sur une semaine complète (lun-ven)
+      // Disponibilité semaine complète (lun-ven + sam-dim)
       const isAvailableForWeek = (anesthId, mondayDate) => {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 7; i++) { // Lun-Dim
           const d = new Date(mondayDate);
           d.setDate(d.getDate() + i);
           const dk = formatDateKey(d);
@@ -510,16 +513,7 @@ const AnesthesistScheduler = () => {
         return true;
       };
 
-      // Vérifier disponibilité WE
-      const isAvailableForWE = (anesthId, saturdayDate) => {
-        const satKey = formatDateKey(saturdayDate);
-        const sunDate = new Date(saturdayDate);
-        sunDate.setDate(sunDate.getDate() + 1);
-        const sunKey = formatDateKey(sunDate);
-        return !unavailMap[satKey]?.has(anesthId) && !unavailMap[sunKey]?.has(anesthId);
-      };
-
-      // Picker avec équilibrage par ETP
+      // Picker équilibré par ETP
       const pickMinForStat = (list, statKey) => {
         if (!list.length) return null;
         return list.reduce((best, curr) => {
@@ -532,7 +526,7 @@ const AnesthesistScheduler = () => {
       const inserts = [];
       
       // ============================================
-      // ÉTAPE 1: COLLECTER TOUTES LES SEMAINES
+      // COLLECTER LES SEMAINES
       // ============================================
       const weeks = [];
       let currentMonday = new Date(startDate);
@@ -548,131 +542,79 @@ const AnesthesistScheduler = () => {
       console.log(`${weeks.length} semaines à planifier`);
 
       // ============================================
-      // ÉTAPE 2: ASSIGNER WE EN PREMIER (équilibrage)
+      // PRIORITÉ 1 + 2 + 3: ASSIGNER PAR SEMAINE COMPLÈTE
+      // Pour chaque semaine: 
+      // - Choisir 3 personnes disponibles TOUTE la semaine (lun-dim)
+      // - Celui avec le moins de WE (équilibré) sera en position B (astreinte vendredi = WE)
+      // - Rotation des postes dans la semaine
       // ============================================
-      console.log('Attribution des WE...');
-      
-      for (const week of weeks) {
-        const saturday = new Date(week.monday);
-        saturday.setDate(saturday.getDate() + 5);
-        
-        // Vérifier que le samedi est dans la plage
-        if (saturday > endDate) continue;
-        
-        const availForWE = activeAnesth.filter(a => isAvailableForWE(a.id, saturday));
-        const picked = pickMinForStat(availForWE, 'we');
-        
-        if (picked) {
-          week.weAssigned = picked.id;
-          stats[picked.id].we++;
-          
-          const satKey = formatDateKey(saturday);
-          const sunday = new Date(saturday);
-          sunday.setDate(sunday.getDate() + 1);
-          const sunKey = formatDateKey(sunday);
-          
-          inserts.push({ date: satKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: saturday.getFullYear() });
-          inserts.push({ date: sunKey, shift: 'astreinte_we', anesthesist_id: picked.id, year: sunday.getFullYear() });
-        }
-      }
 
-      // ============================================
-      // ÉTAPE 3: ASSIGNER FÉRIÉS (équilibrage)
-      // ============================================
-      console.log('Attribution des fériés...');
-      
-      for (const week of weeks) {
-        for (let i = 0; i < 5; i++) {
-          const d = new Date(week.monday);
-          d.setDate(d.getDate() + i);
-          const dk = formatDateKey(d);
-          
-          // Vérifier que le jour est dans la plage
-          if (d < startDate || d > endDate) continue;
-          
-          if (holidaySet.has(dk)) {
-            const availForFerie = activeAnesth.filter(a => !unavailMap[dk]?.has(a.id));
-            const picked = pickMinForStat(availForFerie, 'ferie');
-            
-            if (picked) {
-              stats[picked.id].ferie++;
-              inserts.push({ date: dk, shift: 'astreinte_ferie', anesthesist_id: picked.id, year: d.getFullYear() });
-            }
-          }
-        }
-      }
-
-      // ============================================
-      // ÉTAPE 4: SEMAINES AVEC ROTATION DES POSTES
-      // ============================================
-      console.log('Attribution des semaines avec rotation...');
-
-      // Pattern de rotation : [qui fait astreinte+bloc, qui fait bloc, qui fait consult]
+      // Pattern de rotation : [astreinte+bloc, bloc, consultation]
       const rotationPattern = [
         [0, 1, 2], // Lundi:    A=astr+bloc, B=bloc, C=consult
         [1, 2, 0], // Mardi:    B=astr+bloc, C=bloc, A=consult
         [2, 0, 1], // Mercredi: C=astr+bloc, A=bloc, B=consult
         [0, 1, 2], // Jeudi:    A=astr+bloc, B=bloc, C=consult
-        [1, 2, 0], // Vendredi: B=astr+bloc, C=bloc, A=consult
+        [1, 2, 0], // Vendredi: B=astr+bloc, C=bloc, A=consult (B fait le WE!)
       ];
       
       for (const week of weeks) {
-        const availForWeek = activeAnesth.filter(a => isAvailableForWeek(a.id, week.monday));
+        // Trouver qui est disponible TOUTE la semaine (lun-dim)
+        const availForFullWeek = activeAnesth.filter(a => isAvailableForWeek(a.id, week.monday));
         
-        if (availForWeek.length < 3) {
-          console.warn(`Semaine ${week.weekKey}: seulement ${availForWeek.length} personnes disponibles`);
+        if (availForFullWeek.length < 3) {
+          console.warn(`Semaine ${week.weekKey}: seulement ${availForFullWeek.length} personnes disponibles toute la semaine`);
+          // TODO: gérer ce cas (semaine partielle)
           continue;
         }
 
-        const weekTeam = [];
-        const wePersonId = week.weAssigned;
-        const wePerson = wePersonId ? availForWeek.find(a => a.id === wePersonId) : null;
+        // PRIORITÉ 3: Équilibrer les WE
+        // La personne B fait l'astreinte vendredi, donc fait le WE
+        // On choisit celle avec le moins de WE pour la position B
         
-        const remaining = availForWeek.filter(a => a.id !== wePersonId);
-        
-        // Position A
-        const personA = pickMinForStat(remaining, 'semaines');
-        if (personA) {
-          weekTeam[0] = personA;
-          stats[personA.id].semaines++;
-        }
-        
-        // Position B (fait le WE)
-        if (wePerson) {
-          weekTeam[1] = wePerson;
-          stats[wePerson.id].semaines++;
-        } else {
-          const personB = pickMinForStat(remaining.filter(a => a.id !== personA?.id), 'semaines');
-          if (personB) {
-            weekTeam[1] = personB;
-            stats[personB.id].semaines++;
-          }
-        }
-        
-        // Position C
-        const personC = pickMinForStat(remaining.filter(a => a.id !== personA?.id && a.id !== weekTeam[1]?.id), 'semaines');
-        if (personC) {
-          weekTeam[2] = personC;
-          stats[personC.id].semaines++;
-        }
+        // Trier par nombre de WE (équilibré par ETP)
+        const sortedByWE = [...availForFullWeek].sort((a, b) => {
+          const scoreA = stats[a.id].we / stats[a.id].etp;
+          const scoreB = stats[b.id].we / stats[b.id].etp;
+          return scoreA - scoreB;
+        });
 
-        if (!weekTeam[0] || !weekTeam[1] || !weekTeam[2]) {
-          console.warn(`Semaine ${week.weekKey}: équipe incomplète`);
-          continue;
-        }
+        // Position B = celui avec le moins de WE (il fera le WE)
+        const personB = sortedByWE[0];
+        
+        // Positions A et C parmi les restants
+        const remaining = sortedByWE.filter(a => a.id !== personB.id);
+        const personA = remaining[0];
+        const personC = remaining[1];
 
-        console.log(`Semaine ${week.weekKey}: ${weekTeam.map(p => p.name.split(' ')[1]).join(', ')}`);
+        const weekTeam = [personA, personB, personC];
+        
+        stats[personA.id].semaines++;
+        stats[personB.id].semaines++;
+        stats[personC.id].semaines++;
+        stats[personB.id].we++; // B fait le WE
 
+        console.log(`Semaine ${week.weekKey}: A=${personA.name.split(' ')[1]}, B=${personB.name.split(' ')[1]} (WE), C=${personC.name.split(' ')[1]}`);
+
+        // ============================================
+        // GÉNÉRER LES JOURS DE LA SEMAINE
+        // ============================================
         for (let dayIndex = 0; dayIndex < 5; dayIndex++) {
           const d = new Date(week.monday);
           d.setDate(d.getDate() + dayIndex);
           const dk = formatDateKey(d);
           
-          // Vérifier que le jour est dans la plage
-          if (d < startDate || d > endDate) continue;
-          
-          // Skip si jour férié
-          if (holidaySet.has(dk)) continue;
+          // Si jour férié en semaine
+          if (holidaySet.has(dk)) {
+            // PRIORITÉ 2: Astreinte férié = astreinte de la veille
+            // La veille = dayIndex-1, on regarde qui était d'astreinte
+            const [prevAstrIdx] = dayIndex > 0 ? rotationPattern[dayIndex - 1] : [1]; // Si lundi férié, prendre B (astreinte vendredi précédent)
+            const feriePerson = weekTeam[prevAstrIdx];
+            
+            inserts.push({ date: dk, shift: 'astreinte_ferie', anesthesist_id: feriePerson.id, year: d.getFullYear() });
+            stats[feriePerson.id].ferie++;
+            continue;
+          }
           
           const [astrIdx, blocIdx, consIdx] = rotationPattern[dayIndex];
           
@@ -683,16 +625,31 @@ const AnesthesistScheduler = () => {
           // Astreinte + Bloc
           inserts.push({ date: dk, shift: 'astreinte', anesthesist_id: astrPerson.id, year: d.getFullYear() });
           inserts.push({ date: dk, shift: 'bloc', anesthesist_id: astrPerson.id, year: d.getFullYear() });
-          stats[astrPerson.id].astreinte++;
-          stats[astrPerson.id].bloc++;
 
           // Bloc (2ème personne)
           inserts.push({ date: dk, shift: 'bloc', anesthesist_id: blocPerson.id, year: d.getFullYear() });
-          stats[blocPerson.id].bloc++;
 
           // Consultation
           inserts.push({ date: dk, shift: 'consultation', anesthesist_id: consPerson.id, year: d.getFullYear() });
-          stats[consPerson.id].consultation++;
+        }
+
+        // ============================================
+        // SAMEDI + DIMANCHE
+        // PRIORITÉ 2: Celui d'astreinte vendredi (B) fait le WE
+        // ============================================
+        const saturday = new Date(week.monday);
+        saturday.setDate(saturday.getDate() + 5);
+        const sunday = new Date(week.monday);
+        sunday.setDate(sunday.getDate() + 6);
+        
+        // Vérifier que le WE est dans la plage
+        if (saturday <= endDate) {
+          const satKey = formatDateKey(saturday);
+          const sunKey = formatDateKey(sunday);
+          
+          // B était d'astreinte vendredi, donc fait le WE
+          inserts.push({ date: satKey, shift: 'astreinte_we', anesthesist_id: personB.id, year: saturday.getFullYear() });
+          inserts.push({ date: sunKey, shift: 'astreinte_we', anesthesist_id: personB.id, year: sunday.getFullYear() });
         }
       }
 
@@ -727,7 +684,7 @@ const AnesthesistScheduler = () => {
       const modeLabel = mode === 'range' 
         ? `Plage du ${new Date(rangeStart).toLocaleDateString('fr-FR')} au ${new Date(rangeEnd).toLocaleDateString('fr-FR')}`
         : 'Planning intégral 18 mois';
-      alert(`✅ ${modeLabel}\n\n${inserts.length} entrées générées\n\n• WE et fériés équilibrés (historique pris en compte)\n• Semaines complètes avec rotation des postes`);
+      alert(`✅ ${modeLabel}\n\n${inserts.length} entrées générées\n\n• Semaines complètes (3 personnes/semaine)\n• Astreinte WE = astreinte du vendredi\n• WE et fériés équilibrés`);
 
     } catch (err) {
       console.error('ERREUR GÉNÉRATION:', err);
@@ -863,7 +820,11 @@ const AnesthesistScheduler = () => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const days = [];
-    for (let i = 0; i < firstDay.getDay(); i++) days.push(null);
+    // Ajuster pour commencer le lundi (0=lun, 6=dim)
+    // getDay() retourne 0=dim, 1=lun, ..., 6=sam
+    // On veut que lundi=0, donc on fait (getDay() + 6) % 7
+    const firstDayOfWeek = (firstDay.getDay() + 6) % 7;
+    for (let i = 0; i < firstDayOfWeek; i++) days.push(null);
     for (let i = 1; i <= lastDay.getDate(); i++) days.push(new Date(year, month, i));
     return days;
   };
@@ -1200,7 +1161,7 @@ const AnesthesistScheduler = () => {
               {viewMode === 'month' && (
                 <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
                   <div className="grid grid-cols-7 border-b">
-                    {['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'].map(day => (
+                    {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(day => (
                       <div key={day} className="p-2 text-center text-xs font-semibold border-r last:border-r-0" style={{ color: theme.gray[500] }}>{day}</div>
                     ))}
                   </div>
