@@ -1557,12 +1557,32 @@ const AnesthesistScheduler = () => {
                                 <select 
                                   className="w-full text-xs p-1.5 border rounded-lg mt-1" 
                                   value="" 
-                                  onChange={(e) => e.target.value && toggleAssignment(d, parseInt(e.target.value), shift)}
+                                  onChange={(e) => {
+                                    if (!e.target.value) return;
+                                    if (e.target.value.startsWith('r_')) {
+                                      // Remplaçant - pour l'instant on affiche juste une alerte
+                                      // TODO: implémenter l'assignation des remplaçants
+                                      const remplacantId = parseInt(e.target.value.substring(2));
+                                      const remplacant = remplacants.find(r => r.id === remplacantId);
+                                      alert(`Remplaçant sélectionné : ${remplacant?.name}\n\nPour assigner un remplaçant, il faut d'abord le créer comme compte temporaire.`);
+                                    } else {
+                                      toggleAssignment(d, parseInt(e.target.value), shift);
+                                    }
+                                  }}
                                 >
                                   <option value="">+ Ajouter</option>
-                                  {anesthesists.filter(a => a.role !== 'viewer' && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
-                                    <option key={a.id} value={a.id}>{a.name}</option>
-                                  ))}
+                                  <optgroup label="── Titulaires ──">
+                                    {anesthesists.filter(a => a.role !== 'viewer' && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
+                                      <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                  </optgroup>
+                                  {remplacants.length > 0 && (
+                                    <optgroup label="── Remplaçants ──">
+                                      {remplacants.map(r => (
+                                        <option key={`r_${r.id}`} value={`r_${r.id}`}>{r.name}</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
                                 </select>
                               )}
                             </div>
@@ -1616,12 +1636,12 @@ const AnesthesistScheduler = () => {
                       onClick={() => { 
                         // Si tous sont sélectionnés, on sélectionne uniquement celui cliqué
                         // Sinon, on ajoute/retire de la sélection
-                        const allSelected = selectedFilters.size === anesthesists.filter(x => x.role !== 'viewer').length;
+                        const allSelected = selectedFilters.size === anesthesists.filter(x => x.role !== 'viewer').length + 1; // +1 pour remplaçants
                         if (allSelected) {
                           setSelectedFilters(new Set([a.id]));
                         } else if (selectedFilters.has(a.id) && selectedFilters.size === 1) {
                           // Si c'est le dernier sélectionné, remettre tous
-                          setSelectedFilters(new Set(anesthesists.filter(x => x.role !== 'viewer').map(x => x.id)));
+                          setSelectedFilters(new Set([...anesthesists.filter(x => x.role !== 'viewer').map(x => x.id), 'remplacants']));
                         } else if (selectedFilters.has(a.id)) {
                           const f = new Set(selectedFilters);
                           f.delete(a.id);
@@ -1638,7 +1658,25 @@ const AnesthesistScheduler = () => {
                       {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]} {a.id === currentUser?.id && '(moi)'}
                     </button>
                   ))}
-                  <button onClick={() => setSelectedFilters(new Set(anesthesists.filter(a => a.role !== 'viewer').map(a => a.id)))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+                  {/* Bouton Remplaçants */}
+                  <button 
+                    onClick={() => { 
+                      if (selectedFilters.has('remplacants')) {
+                        const f = new Set(selectedFilters);
+                        f.delete('remplacants');
+                        setSelectedFilters(f);
+                      } else {
+                        const f = new Set(selectedFilters);
+                        f.add('remplacants');
+                        setSelectedFilters(f);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selectedFilters.has('remplacants') ? 'text-white' : ''}`}
+                    style={selectedFilters.has('remplacants') ? { backgroundColor: theme.gray[600], borderColor: theme.gray[600] } : { borderColor: theme.gray[200], color: theme.gray[400] }}
+                  >
+                    Remplaçants
+                  </button>
+                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => a.role !== 'viewer').map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
                 </div>
               </div>
