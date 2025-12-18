@@ -1409,13 +1409,17 @@ const AnesthesistScheduler = () => {
       } else if (entry.type === 'remplacant') {
         // Afficher si le filtre "remplacants" est actif
         if (selectedFilters.has('remplacants')) {
+          // Chercher qui est remplacé dans l'historique
+          const repl = remplacements.find(r => r.date === key && r.shift === shift && r.remplacant_name === entry.name);
+          const titulaire = repl ? anesthesists.find(t => t.id === repl.titulaire_id) : null;
+          
           return { 
             id: `r_${entry.scheduleId}`, 
             name: entry.name, 
             color: theme.gray[500], 
             isRemplacant: true,
             scheduleId: entry.scheduleId,
-            titulaireRemplace: entry.titulaireRemplace
+            titulaireRemplace: titulaire?.name || null
           };
         }
       }
