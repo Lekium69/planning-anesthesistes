@@ -555,8 +555,20 @@ const AnesthesistScheduler = () => {
             // C'est un titulaire
             scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
           } else if (item.remplacant_name) {
-            // C'est un remplaçant
-            scheduleMap[item.date][item.shift].push({ type: 'remplacant', name: item.remplacant_name, scheduleId: item.id });
+            // C'est un remplaçant - chercher qui est remplacé dans l'historique
+            const remplacement = replmts.data?.find(r => 
+              r.date === item.date && 
+              r.shift === item.shift && 
+              r.remplacant_name === item.remplacant_name
+            );
+            const titulaireRemplace = remplacement ? anesthWithColors.find(a => a.id === remplacement.titulaire_id) : null;
+            
+            scheduleMap[item.date][item.shift].push({ 
+              type: 'remplacant', 
+              name: item.remplacant_name, 
+              scheduleId: item.id,
+              titulaireRemplace: titulaireRemplace?.name || null
+            });
           }
         });
         setSchedule(scheduleMap);
@@ -1402,7 +1414,8 @@ const AnesthesistScheduler = () => {
             name: entry.name, 
             color: theme.gray[500], 
             isRemplacant: true,
-            scheduleId: entry.scheduleId
+            scheduleId: entry.scheduleId,
+            titulaireRemplace: entry.titulaireRemplace
           };
         }
       }
@@ -1722,8 +1735,18 @@ const AnesthesistScheduler = () => {
                                   }} 
                                   className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : ''} ${!a.isRemplacant && a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
                                   style={{ backgroundColor: a.color }}
+                                  title={a.isRemplacant && a.titulaireRemplace ? `${a.name} remplace ${a.titulaireRemplace}` : a.name}
                                 >
-                                  {a.isRemplacant ? '🔄 ' : 'Dr '}{a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}
+                                  {a.isRemplacant ? (
+                                    <>
+                                      🔄 {a.name.split(' ')[1] || a.name.split(' ')[0]}
+                                      {a.titulaireRemplace && (
+                                        <span className="opacity-75"> → {a.titulaireRemplace.split(' ')[1] === 'EL' ? 'EL K.' : a.titulaireRemplace.split(' ')[1]?.substring(0, 4)}</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>Dr {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}</>
+                                  )}
                                 </div>
                               ))}
                               {canEdit && (
