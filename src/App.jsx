@@ -522,9 +522,10 @@ const AnesthesistScheduler = () => {
           const { data: prefs } = await supabase.from('email_preferences').select('*').eq('anesthesist_id', profile.id).single();
           if (prefs) setEmailPreferences(prefs);
         }
-        // Ne réinitialiser les filtres qu'au premier chargement (pas quand l'utilisateur a choisi "Aucun")
+        // Ne réinitialiser les filtres qu'au premier chargement (seulement titulaires ETP >= 0.2)
         if (selectedFilters.size === 0 && !filtersInitialized.current) {
-          setSelectedFilters(new Set([...anesthWithColors.map(a => a.id), 'remplacants']));
+          const titulaires = anesthWithColors.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2);
+          setSelectedFilters(new Set([...titulaires.map(a => a.id), 'remplacants']));
           filtersInitialized.current = true;
         }
       }
@@ -1625,7 +1626,7 @@ const AnesthesistScheduler = () => {
                                 >
                                   <option value="">+ Ajouter</option>
                                   <optgroup label="── Titulaires ──">
-                                    {anesthesists.filter(a => a.role !== 'viewer' && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
+                                    {anesthesists.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2 && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
                                       <option key={a.id} value={a.id}>{a.name}</option>
                                     ))}
                                   </optgroup>
@@ -1683,15 +1684,16 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border border-gray-200 p-4 mt-6">
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="font-medium text-sm" style={{ color: theme.gray[700] }}><Users className="w-4 h-4 inline mr-1" />Filtrer :</span>
-                  {anesthesists.filter(a => a.role !== 'viewer').map(a => (
+                  {anesthesists.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2).map(a => (
                     <button 
                       key={a.id} 
                       onClick={() => { 
-                        const allSelected = selectedFilters.size === anesthesists.filter(x => x.role !== 'viewer').length + 1;
+                        const titulaires = anesthesists.filter(x => x.role !== 'viewer' && (x.etp || 0) >= 0.2);
+                        const allSelected = selectedFilters.size === titulaires.length + 1;
                         if (allSelected) {
                           setSelectedFilters(new Set([a.id]));
                         } else if (selectedFilters.has(a.id) && selectedFilters.size === 1) {
-                          setSelectedFilters(new Set([...anesthesists.filter(x => x.role !== 'viewer').map(x => x.id), 'remplacants']));
+                          setSelectedFilters(new Set([...titulaires.map(x => x.id), 'remplacants']));
                         } else if (selectedFilters.has(a.id)) {
                           const f = new Set(selectedFilters);
                           f.delete(a.id);
@@ -1726,7 +1728,7 @@ const AnesthesistScheduler = () => {
                   >
                     Remplaçants
                   </button>
-                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => a.role !== 'viewer').map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
                 </div>
               </div>
