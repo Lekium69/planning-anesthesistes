@@ -1091,24 +1091,50 @@ const AnesthesistScheduler = () => {
     const remplacant = remplacants.find(r => r.id === remplacantId);
     if (!remplacant) return;
     
-    // 1. Enregistrer dans l'historique des remplacements
-    await supabase.from('remplacements').insert({
-      date,
-      shift,
-      remplacant_id: remplacantId,
-      remplacant_name: remplacant.name,
-      titulaire_id: titulaireId
-    });
+    // Vérifier si ce remplacement existe déjà (éviter doublons)
+    const { data: existing } = await supabase
+      .from('remplacements')
+      .select('id')
+      .eq('date', date)
+      .eq('shift', shift)
+      .eq('remplacant_name', remplacant.name)
+      .single();
     
-    // 2. Ajouter le remplaçant au planning (via schedule avec remplacant_name)
-    const year = new Date(date).getFullYear();
-    await supabase.from('schedule').insert({
-      date,
-      shift,
-      anesthesist_id: null, // Pas d'anesthesist_id car c'est un remplaçant
-      remplacant_name: remplacant.name,
-      year
-    });
+    if (!existing) {
+      // 1. Enregistrer dans l'historique des remplacements
+      await supabase.from('remplacements').insert({
+        date,
+        shift,
+        remplacant_id: remplacantId,
+        remplacant_name: remplacant.name,
+        titulaire_id: titulaireId
+      });
+    }
+    
+    // 2. Vérifier si déjà dans le planning
+    const { data: existingSchedule } = await supabase
+      .from('schedule')
+      .select('id')
+      .eq('date', date)
+      .eq('shift', shift)
+      .eq('remplacant_name', remplacant.name)
+      .single();
+    
+    if (!existingSchedule) {
+      // Ajouter le remplaçant au planning
+      const year = new Date(date).getFullYear();
+      const { error } = await supabase.from('schedule').insert({
+        date,
+        shift,
+        anesthesist_id: null,
+        remplacant_name: remplacant.name,
+        year
+      });
+      
+      if (error) {
+        console.error('Erreur ajout schedule:', error);
+      }
+    }
     
     setReplacementModal(null);
     await loadData();
@@ -1213,7 +1239,8 @@ const AnesthesistScheduler = () => {
   // CALCUL DES STATS AVEC REMPLACEMENTS
   // ============================================
   const calculateFullStats = () => {
-    const stats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
+    // Stats pour les titulaires
+    const titulairesStats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
       ...a, 
       bloc: 0, 
       consultation: 0, 
@@ -1222,15 +1249,41 @@ const AnesthesistScheduler = () => {
       ferie: 0, 
       total: 0,
       joursRemplaces: 0,
-      etp: a.etp || 0.5
+      etp: a.etp || 0.5,
+      isTitulaire: true
     }));
 
+    // Stats pour les remplaçants (depuis la table remplacements)
+    const remplacantsStatsMap = {};
+    
     // Compter les jours travaillés
     Object.entries(schedule).forEach(([dateKey, shifts]) => {
-      Object.entries(shifts).forEach(([shift, ids]) => {
-        ids.forEach(id => {
-          const stat = stats.find(s => s.id === id);
-          if (stat) {
+      Object.entries(shifts).forEach(([shift, entries]) => {
+        entries.forEach(entry => {
+          if (entry.type === 'titulaire') {
+            const stat = titulairesStats.find(s => s.id === entry.id);
+            if (stat) {
+              stat.total++;
+              if (shift === 'bloc') stat.bloc++;
+              else if (shift === 'consultation') stat.consultation++;
+              else if (shift === 'astreinte') stat.astreinte++;
+              else if (shift === 'astreinte_we') stat.we++;
+              else if (shift === 'astreinte_ferie') stat.ferie++;
+            }
+          } else if (entry.type === 'remplacant') {
+            // Compter les stats des remplaçants
+            if (!remplacantsStatsMap[entry.name]) {
+              remplacantsStatsMap[entry.name] = {
+                id: `rempl_${entry.name}`,
+                name: entry.name,
+                color: theme.gray[500],
+                bloc: 0, consultation: 0, astreinte: 0, we: 0, ferie: 0, total: 0,
+                joursRemplaces: 0,
+                etp: 0,
+                isTitulaire: false
+              };
+            }
+            const stat = remplacantsStatsMap[entry.name];
             stat.total++;
             if (shift === 'bloc') stat.bloc++;
             else if (shift === 'consultation') stat.consultation++;
@@ -1242,15 +1295,17 @@ const AnesthesistScheduler = () => {
       });
     });
 
-    // Compter les jours remplacés
+    // Compter les jours remplacés pour les titulaires
     remplacements.forEach(r => {
-      const stat = stats.find(s => s.id === r.titulaire_id);
+      const stat = titulairesStats.find(s => s.id === r.titulaire_id);
       if (stat) {
         stat.joursRemplaces++;
       }
     });
 
-    return stats;
+    // Combiner titulaires et remplaçants
+    const remplacantsStats = Object.values(remplacantsStatsMap);
+    return [...titulairesStats, ...remplacantsStats];
   };
 
   const transferAdmin = async (newAdminId) => {
@@ -1269,7 +1324,7 @@ const AnesthesistScheduler = () => {
   // STATS
   // ============================================
   const calculateStats = () => {
-    const stats = anesthesists.map(a => ({
+    const stats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
       ...a, 
       bloc: 0, 
       consultation: 0, 
@@ -1281,16 +1336,18 @@ const AnesthesistScheduler = () => {
     }));
 
     Object.entries(schedule).forEach(([dateKey, shifts]) => {
-      Object.entries(shifts).forEach(([shift, ids]) => {
-        ids.forEach(id => {
-          const stat = stats.find(s => s.id === id);
-          if (stat) {
-            stat.total++;
-            if (shift === 'bloc') stat.bloc++;
-            else if (shift === 'consultation') stat.consultation++;
-            else if (shift === 'astreinte') stat.astreinte++;
-            else if (shift === 'astreinte_we') stat.we++;
-            else if (shift === 'astreinte_ferie') stat.ferie++;
+      Object.entries(shifts).forEach(([shift, entries]) => {
+        entries.forEach(entry => {
+          if (entry.type === 'titulaire') {
+            const stat = stats.find(s => s.id === entry.id);
+            if (stat) {
+              stat.total++;
+              if (shift === 'bloc') stat.bloc++;
+              else if (shift === 'consultation') stat.consultation++;
+              else if (shift === 'astreinte') stat.astreinte++;
+              else if (shift === 'astreinte_we') stat.we++;
+              else if (shift === 'astreinte_ferie') stat.ferie++;
+            }
           }
         });
       });
@@ -1912,7 +1969,7 @@ const AnesthesistScheduler = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {calculateFullStats().filter(stat => stat.etp >= 0.2).map(stat => (
+                      {calculateFullStats().filter(stat => stat.isTitulaire).map(stat => (
                         <tr key={stat.id} className="border-b hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -1975,7 +2032,7 @@ const AnesthesistScheduler = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {calculateFullStats().filter(stat => stat.etp < 0.2 && stat.total > 0).map(stat => (
+                      {calculateFullStats().filter(stat => !stat.isTitulaire && stat.total > 0).map(stat => (
                         <tr key={stat.id} className="border-b hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -1991,7 +2048,7 @@ const AnesthesistScheduler = () => {
                           <td className="px-4 py-3 text-center text-sm font-bold">{stat.total}</td>
                         </tr>
                       ))}
-                      {calculateFullStats().filter(stat => stat.etp < 0.2 && stat.total > 0).length === 0 && (
+                      {calculateFullStats().filter(stat => !stat.isTitulaire && stat.total > 0).length === 0 && (
                         <tr>
                           <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>
                             Aucun remplaçant n'a encore travaillé
