@@ -103,6 +103,12 @@ const ShiftIcon = ({ shift, className = "w-4 h-4" }) => {
   return <Calendar className={className} />;
 };
 
+// Helper pour identifier un TITULAIRE (pas viewer, pas remplaçant)
+// Un titulaire a un ETP >= 0.5 (50%) - Les remplaçants ne sont PAS dans anesthesists
+const isTitulaire = (anesthesist) => {
+  return anesthesist && anesthesist.role !== 'viewer' && (anesthesist.etp || 0) >= 0.5;
+};
+
 // ============================================
 // CALCUL DES JOURS FÉRIÉS FRANÇAIS
 // ============================================
@@ -524,7 +530,7 @@ const AnesthesistScheduler = () => {
         }
         // Ne réinitialiser les filtres qu'au premier chargement (seulement titulaires ETP >= 0.2)
         if (selectedFilters.size === 0 && !filtersInitialized.current) {
-          const titulaires = anesthWithColors.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2);
+          const titulaires = anesthWithColors.filter(a => isTitulaire(a));
           setSelectedFilters(new Set([...titulaires.map(a => a.id), 'remplacants']));
           filtersInitialized.current = true;
         }
@@ -1174,7 +1180,7 @@ const AnesthesistScheduler = () => {
   // CALCUL DES STATS AVEC REMPLACEMENTS
   // ============================================
   const calculateFullStats = () => {
-    const stats = anesthesists.filter(a => a.role !== 'viewer').map(a => ({
+    const stats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
       ...a, 
       bloc: 0, 
       consultation: 0, 
@@ -1474,9 +1480,9 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
-                    {['week', 'month'].map(m => (
+                    {['week', 'month', 'year'].map(m => (
                       <button key={m} onClick={() => setViewMode(m)} className={`px-4 py-2 rounded-xl text-sm font-medium ${viewMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>
-                        {m === 'week' ? 'Semaine' : 'Mois'}
+                        {m === 'week' ? 'Semaine' : m === 'month' ? 'Mois' : 'Année'}
                       </button>
                     ))}
                   </div>
@@ -1626,7 +1632,7 @@ const AnesthesistScheduler = () => {
                                 >
                                   <option value="">+ Ajouter</option>
                                   <optgroup label="── Titulaires ──">
-                                    {anesthesists.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2 && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
+                                    {anesthesists.filter(a => isTitulaire(a) && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
                                       <option key={a.id} value={a.id}>{a.name}</option>
                                     ))}
                                   </optgroup>
@@ -1680,15 +1686,97 @@ const AnesthesistScheduler = () => {
                 </div>
               )}
 
+              {/* Vue Année */}
+              {viewMode === 'year' && (
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                  <div className="p-4 border-b flex items-center justify-between">
+                    <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear() - 1, 0, 1))} className="p-2 rounded-xl hover:bg-gray-100">
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <h3 className="text-lg font-bold">{currentMonth.getFullYear()}</h3>
+                    <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear() + 1, 0, 1))} className="p-2 rounded-xl hover:bg-gray-100">
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4 p-4">
+                    {Array.from({ length: 12 }, (_, monthIndex) => {
+                      const monthDate = new Date(currentMonth.getFullYear(), monthIndex, 1);
+                      const monthName = monthDate.toLocaleDateString('fr-FR', { month: 'long' });
+                      const daysInMonth = new Date(currentMonth.getFullYear(), monthIndex + 1, 0).getDate();
+                      
+                      // Calculer les stats du mois
+                      let totalAssignments = 0;
+                      let weCount = 0;
+                      
+                      for (let day = 1; day <= daysInMonth; day++) {
+                        const d = new Date(currentMonth.getFullYear(), monthIndex, day);
+                        const dateKey = formatDateKey(d);
+                        const daySchedule = schedule[dateKey];
+                        if (daySchedule) {
+                          Object.values(daySchedule).forEach(ids => {
+                            totalAssignments += ids.length;
+                          });
+                        }
+                        if (isWeekend(d)) weCount++;
+                      }
+                      
+                      return (
+                        <div 
+                          key={monthIndex} 
+                          className="border rounded-xl p-3 hover:bg-gray-50 cursor-pointer transition-all"
+                          onClick={() => {
+                            setCurrentMonth(monthDate);
+                            setViewMode('month');
+                          }}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-semibold capitalize">{monthName}</span>
+                            <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: theme.gray[100] }}>
+                              {daysInMonth}j
+                            </span>
+                          </div>
+                          <div className="text-xs space-y-1" style={{ color: theme.gray[500] }}>
+                            <div className="flex justify-between">
+                              <span>Assignations:</span>
+                              <span className="font-medium" style={{ color: theme.gray[700] }}>{totalAssignments}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Week-ends:</span>
+                              <span className="font-medium" style={{ color: theme.gray[700] }}>{weCount / 2} WE</span>
+                            </div>
+                          </div>
+                          {/* Mini calendrier visuel */}
+                          <div className="mt-2 grid grid-cols-7 gap-0.5">
+                            {Array.from({ length: daysInMonth }, (_, i) => {
+                              const d = new Date(currentMonth.getFullYear(), monthIndex, i + 1);
+                              const dateKey = formatDateKey(d);
+                              const hasData = schedule[dateKey] && Object.keys(schedule[dateKey]).length > 0;
+                              const isWE = isWeekend(d);
+                              return (
+                                <div 
+                                  key={i} 
+                                  className={`w-2 h-2 rounded-sm ${hasData ? 'bg-blue-500' : isWE ? 'bg-gray-200' : 'bg-gray-100'}`}
+                                  title={`${i + 1} ${monthName}`}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Filtres */}
               <div className="bg-white rounded-2xl border border-gray-200 p-4 mt-6">
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="font-medium text-sm" style={{ color: theme.gray[700] }}><Users className="w-4 h-4 inline mr-1" />Filtrer :</span>
-                  {anesthesists.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2).map(a => (
+                  {anesthesists.filter(a => isTitulaire(a)).map(a => (
                     <button 
                       key={a.id} 
                       onClick={() => { 
-                        const titulaires = anesthesists.filter(x => x.role !== 'viewer' && (x.etp || 0) >= 0.2);
+                        const titulaires = anesthesists.filter(x => isTitulaire(x));
                         const allSelected = selectedFilters.size === titulaires.length + 1;
                         if (allSelected) {
                           setSelectedFilters(new Set([a.id]));
@@ -1728,7 +1816,7 @@ const AnesthesistScheduler = () => {
                   >
                     Remplaçants
                   </button>
-                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => a.role !== 'viewer' && (a.etp || 0) >= 0.2).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isTitulaire(a)).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
                 </div>
               </div>
@@ -2666,7 +2754,7 @@ const AnesthesistScheduler = () => {
                 <strong>{remplacants.find(r => r.id === replacementModal.remplacantId)?.name}</strong> remplace qui pour le <strong>{getShiftLabel(replacementModal.shift)}</strong> du <strong>{new Date(replacementModal.date).toLocaleDateString('fr-FR')}</strong> ?
               </p>
               <div className="space-y-2">
-                {anesthesists.filter(a => a.role !== 'viewer').map(a => (
+                {anesthesists.filter(a => isTitulaire(a)).map(a => (
                   <button
                     key={a.id}
                     onClick={() => addRemplacement(replacementModal.date, replacementModal.shift, replacementModal.remplacantId, a.id)}
