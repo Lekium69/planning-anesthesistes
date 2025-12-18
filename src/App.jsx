@@ -555,19 +555,11 @@ const AnesthesistScheduler = () => {
             // C'est un titulaire
             scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
           } else if (item.remplacant_name) {
-            // C'est un remplaçant - chercher qui est remplacé dans l'historique
-            const remplacement = replmts.data?.find(r => 
-              r.date === item.date && 
-              r.shift === item.shift && 
-              r.remplacant_name === item.remplacant_name
-            );
-            const titulaireRemplace = remplacement ? anesthWithColors.find(a => a.id === remplacement.titulaire_id) : null;
-            
+            // C'est un remplaçant
             scheduleMap[item.date][item.shift].push({ 
               type: 'remplacant', 
               name: item.remplacant_name, 
-              scheduleId: item.id,
-              titulaireRemplace: titulaireRemplace?.name || null
+              scheduleId: item.id
             });
           }
         });
