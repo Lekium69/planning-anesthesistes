@@ -104,9 +104,15 @@ const ShiftIcon = ({ shift, className = "w-4 h-4" }) => {
 };
 
 // Helper pour identifier un TITULAIRE (pas viewer, pas remplaçant)
-// Un titulaire a un ETP >= 0.5 (50%) - Les remplaçants ne sont PAS dans anesthesists
+// Un titulaire a un ETP >= 0.5 (50%) et n'est pas un compte générique
 const isTitulaire = (anesthesist) => {
-  return anesthesist && anesthesist.role !== 'viewer' && (anesthesist.etp || 0) >= 0.5;
+  if (!anesthesist) return false;
+  if (anesthesist.role === 'viewer') return false;
+  if ((anesthesist.etp || 0) < 0.5) return false;
+  // Exclure les comptes génériques "Remplaçant"
+  if (anesthesist.name?.toLowerCase().includes('remplaçant')) return false;
+  if (anesthesist.name?.toLowerCase().includes('remplacant')) return false;
+  return true;
 };
 
 // ============================================
