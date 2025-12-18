@@ -550,7 +550,14 @@ const AnesthesistScheduler = () => {
         sched.data.forEach(item => {
           if (!scheduleMap[item.date]) scheduleMap[item.date] = {};
           if (!scheduleMap[item.date][item.shift]) scheduleMap[item.date][item.shift] = [];
-          scheduleMap[item.date][item.shift].push(item.anesthesist_id);
+          
+          if (item.anesthesist_id) {
+            // C'est un titulaire
+            scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
+          } else if (item.remplacant_name) {
+            // C'est un remplaçant
+            scheduleMap[item.date][item.shift].push({ type: 'remplacant', name: item.remplacant_name, scheduleId: item.id });
+          }
         });
         setSchedule(scheduleMap);
       }
@@ -938,13 +945,21 @@ const AnesthesistScheduler = () => {
   const toggleAssignment = async (date, anesthesistId, shift) => {
     if (!canEdit) return;
     const dateKey = formatDateKey(date);
-    const exists = schedule[dateKey]?.[shift]?.includes(anesthesistId);
+    const entries = schedule[dateKey]?.[shift] || [];
+    const exists = entries.some(e => e.type === 'titulaire' && e.id === anesthesistId);
 
     if (exists) {
       await supabase.from('schedule').delete().eq('date', dateKey).eq('shift', shift).eq('anesthesist_id', anesthesistId);
     } else {
       await supabase.from('schedule').insert({ date: dateKey, shift, anesthesist_id: anesthesistId, year: new Date(date).getFullYear() });
     }
+    await loadData();
+  };
+  
+  // Supprimer un remplaçant du planning
+  const removeRemplacant = async (scheduleId) => {
+    if (!canEdit) return;
+    await supabase.from('schedule').delete().eq('id', scheduleId);
     await loadData();
   };
 
@@ -1074,13 +1089,25 @@ const AnesthesistScheduler = () => {
     if (!isAdmin) return;
     
     const remplacant = remplacants.find(r => r.id === remplacantId);
+    if (!remplacant) return;
     
+    // 1. Enregistrer dans l'historique des remplacements
     await supabase.from('remplacements').insert({
       date,
       shift,
       remplacant_id: remplacantId,
-      remplacant_name: remplacant?.name,
+      remplacant_name: remplacant.name,
       titulaire_id: titulaireId
+    });
+    
+    // 2. Ajouter le remplaçant au planning (via schedule avec remplacant_name)
+    const year = new Date(date).getFullYear();
+    await supabase.from('schedule').insert({
+      date,
+      shift,
+      anesthesist_id: null, // Pas d'anesthesist_id car c'est un remplaçant
+      remplacant_name: remplacant.name,
+      year
     });
     
     setReplacementModal(null);
@@ -1302,9 +1329,28 @@ const AnesthesistScheduler = () => {
 
   const getAssigned = (date, shift) => {
     const key = formatDateKey(date);
-    return (schedule[key]?.[shift] || [])
-      .map(id => anesthesists.find(a => a.id === id))
-      .filter(a => a && selectedFilters.has(a.id));
+    const entries = schedule[key]?.[shift] || [];
+    
+    return entries.map(entry => {
+      if (entry.type === 'titulaire') {
+        const anesth = anesthesists.find(a => a.id === entry.id);
+        if (anesth && selectedFilters.has(anesth.id)) {
+          return { ...anesth, isRemplacant: false };
+        }
+      } else if (entry.type === 'remplacant') {
+        // Afficher si le filtre "remplacants" est actif
+        if (selectedFilters.has('remplacants')) {
+          return { 
+            id: `r_${entry.scheduleId}`, 
+            name: entry.name, 
+            color: theme.gray[500], 
+            isRemplacant: true,
+            scheduleId: entry.scheduleId
+          };
+        }
+      }
+      return null;
+    }).filter(Boolean);
   };
 
   const getShiftsForDay = (date) => {
@@ -1609,11 +1655,18 @@ const AnesthesistScheduler = () => {
                               {getAssigned(d, shift).map(a => (
                                 <div 
                                   key={a.id} 
-                                  onClick={() => canEdit && toggleAssignment(d, a.id, shift)} 
-                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : ''} ${a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
+                                  onClick={() => {
+                                    if (!canEdit) return;
+                                    if (a.isRemplacant) {
+                                      removeRemplacant(a.scheduleId);
+                                    } else {
+                                      toggleAssignment(d, a.id, shift);
+                                    }
+                                  }} 
+                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : ''} ${!a.isRemplacant && a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
                                   style={{ backgroundColor: a.color }}
                                 >
-                                  Dr {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}
+                                  {a.isRemplacant ? '🔄 ' : 'Dr '}{a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}
                                 </div>
                               ))}
                               {canEdit && (
@@ -1638,7 +1691,7 @@ const AnesthesistScheduler = () => {
                                 >
                                   <option value="">+ Ajouter</option>
                                   <optgroup label="── Titulaires ──">
-                                    {anesthesists.filter(a => isTitulaire(a) && !getAssigned(d, shift).some(assigned => assigned.id === a.id)).map(a => (
+                                    {anesthesists.filter(a => isTitulaire(a) && !getAssigned(d, shift).some(assigned => !assigned.isRemplacant && assigned.id === a.id)).map(a => (
                                       <option key={a.id} value={a.id}>{a.name}</option>
                                     ))}
                                   </optgroup>
