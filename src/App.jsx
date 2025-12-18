@@ -555,11 +555,19 @@ const AnesthesistScheduler = () => {
             // C'est un titulaire
             scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
           } else if (item.remplacant_name) {
-            // C'est un remplaçant
+            // C'est un remplaçant - chercher qui est remplacé dans l'historique
+            const remplacement = replmts.data?.find(r => 
+              r.date === item.date && 
+              r.shift === item.shift && 
+              r.remplacant_name === item.remplacant_name
+            );
+            const titulaireRemplace = remplacement ? anesthWithColors.find(a => a.id === remplacement.titulaire_id) : null;
+            
             scheduleMap[item.date][item.shift].push({ 
               type: 'remplacant', 
               name: item.remplacant_name, 
-              scheduleId: item.id
+              scheduleId: item.id,
+              titulaireRemplace: titulaireRemplace?.name || null
             });
           }
         });
@@ -1399,13 +1407,15 @@ const AnesthesistScheduler = () => {
           return { ...anesth, isRemplacant: false };
         }
       } else if (entry.type === 'remplacant') {
+        // Afficher si le filtre "remplacants" est actif
         if (selectedFilters.has('remplacants')) {
           return { 
             id: `r_${entry.scheduleId}`, 
             name: entry.name, 
             color: theme.gray[500], 
             isRemplacant: true,
-            scheduleId: entry.scheduleId
+            scheduleId: entry.scheduleId,
+            titulaireRemplace: entry.titulaireRemplace
           };
         }
       }
@@ -1730,17 +1740,9 @@ const AnesthesistScheduler = () => {
                                   {a.isRemplacant ? (
                                     <>
                                       🔄 {a.name.split(' ')[1] || a.name.split(' ')[0]}
-                                      {(() => {
-                                        // Chercher qui est remplacé dans l'historique
-                                        const dateKey = formatDateKey(d);
-                                        const repl = remplacements.find(r => r.date === dateKey && r.shift === shift && r.remplacant_name === a.name);
-                                        const titulaire = repl ? anesthesists.find(t => t.id === repl.titulaire_id) : null;
-                                        if (titulaire) {
-                                          const nom = titulaire.name.split(' ')[1] === 'EL' ? 'EL K.' : titulaire.name.split(' ')[1]?.substring(0, 4);
-                                          return <span className="opacity-75"> → {nom}</span>;
-                                        }
-                                        return null;
-                                      })()}
+                                      {a.titulaireRemplace && (
+                                        <span className="opacity-75"> → {a.titulaireRemplace.split(' ')[1] === 'EL' ? 'EL K.' : a.titulaireRemplace.split(' ')[1]?.substring(0, 4)}</span>
+                                      )}
                                     </>
                                   ) : (
                                     <>Dr {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}</>
