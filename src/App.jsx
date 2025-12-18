@@ -5,7 +5,8 @@ import {
   Stethoscope, Star, FileSpreadsheet, Printer, Settings, Home,
   CalendarOff, MessageSquare, Shield, ChevronLeft, ChevronRight,
   Copy, ExternalLink, Clock, AlertCircle, Plus, Trash2, PlusCircle,
-  Eye, EyeOff, Percent, Phone, Mail, AlertTriangle, Edit2, UserPlus
+  Eye, EyeOff, Percent, Phone, Mail, AlertTriangle, Edit2, UserPlus,
+  BarChart3, UserCheck, Replace
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -168,7 +169,6 @@ const LoginPage = ({ onLogin }) => {
     setError('');
     try {
       if (forgotMode) {
-        // Vérifier si l'email existe
         const { data: userData } = await supabase
           .from('anesthesists')
           .select('email')
@@ -180,9 +180,6 @@ const LoginPage = ({ onLogin }) => {
           setLoading(false);
           return;
         }
-        
-        // Envoyer le reset (si Supabase Auth est configuré)
-        // await supabase.auth.resetPasswordForEmail(email);
         setResetSent(true);
         setLoading(false);
         return;
@@ -212,12 +209,9 @@ const LoginPage = ({ onLogin }) => {
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Mail className="w-8 h-8 text-green-600" />
           </div>
-          <h2 className="text-xl font-bold mb-2" style={{ color: theme.gray[800] }}>Email envoyé !</h2>
+          <h2 className="text-xl font-bold mb-2" style={{ color: theme.gray[800] }}>Demande envoyée</h2>
           <p className="text-gray-500 mb-4">
-            Si un compte existe avec l'adresse <strong>{email}</strong>, vous recevrez un lien de réinitialisation.
-          </p>
-          <p className="text-xs text-gray-400 mb-6">
-            💡 En attendant la configuration email, contactez l'administrateur pour réinitialiser votre mot de passe.
+            Contactez l'administrateur pour réinitialiser votre mot de passe pour <strong>{email}</strong>.
           </p>
           <button 
             onClick={() => { setForgotMode(false); setResetSent(false); setError(''); }}
@@ -286,7 +280,7 @@ const LoginPage = ({ onLogin }) => {
             {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
               <>
                 {forgotMode ? <Mail className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
-                {forgotMode ? 'Envoyer le lien' : isSignUp ? "S'inscrire" : 'Se connecter'}
+                {forgotMode ? 'Demander la réinitialisation' : isSignUp ? "S'inscrire" : 'Se connecter'}
               </>
             )}
           </button>
@@ -445,6 +439,7 @@ const AnesthesistScheduler = () => {
   // Data
   const [anesthesists, setAnesthesists] = useState([]);
   const [remplacants, setRemplacants] = useState([]);
+  const [remplacements, setRemplacements] = useState([]);
   const [schedule, setSchedule] = useState({});
   const [holidays, setHolidays] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -452,8 +447,11 @@ const AnesthesistScheduler = () => {
   const [exchangeBoard, setExchangeBoard] = useState([]);
   const [unavailabilities, setUnavailabilities] = useState([]);
   const [emailPreferences, setEmailPreferences] = useState({});
+  
+  // Modals
   const [editingRemplacant, setEditingRemplacant] = useState(null);
   const [editingAnesth, setEditingAnesth] = useState(null);
+  const [replacementModal, setReplacementModal] = useState(null); // {date, shift, remplacant}
 
   // UI
   const [currentView, setCurrentView] = useState('dashboard');
@@ -495,9 +493,10 @@ const AnesthesistScheduler = () => {
     if (!user) return;
     
     try {
-      const [anesth, rempl, sched, hol, notif, swaps, exchange, unavail] = await Promise.all([
+      const [anesth, rempl, replmts, sched, hol, notif, swaps, exchange, unavail] = await Promise.all([
         supabase.from('anesthesists').select('*').order('id'),
         supabase.from('remplacants').select('*').eq('actif', true).order('name'),
+        supabase.from('remplacements').select('*'),
         supabase.from('schedule').select('*'),
         supabase.from('holidays').select('*'),
         supabase.from('notifications').select('*, swap_request:swap_requests(*)').order('created_at', { ascending: false }),
@@ -525,12 +524,13 @@ const AnesthesistScheduler = () => {
         }
         // Ne réinitialiser les filtres qu'au premier chargement (pas quand l'utilisateur a choisi "Aucun")
         if (selectedFilters.size === 0 && !filtersInitialized.current) {
-          setSelectedFilters(new Set(anesthWithColors.map(a => a.id)));
+          setSelectedFilters(new Set([...anesthWithColors.map(a => a.id), 'remplacants']));
           filtersInitialized.current = true;
         }
       }
 
       if (rempl.data) setRemplacants(rempl.data);
+      if (replmts.data) setRemplacements(replmts.data);
 
       if (sched.data) {
         const scheduleMap = {};
@@ -1055,6 +1055,32 @@ const AnesthesistScheduler = () => {
   };
 
   // ============================================
+  // GESTION DES REMPLACEMENTS
+  // ============================================
+  const addRemplacement = async (date, shift, remplacantId, titulaireId) => {
+    if (!isAdmin) return;
+    
+    const remplacant = remplacants.find(r => r.id === remplacantId);
+    
+    await supabase.from('remplacements').insert({
+      date,
+      shift,
+      remplacant_id: remplacantId,
+      remplacant_name: remplacant?.name,
+      titulaire_id: titulaireId
+    });
+    
+    setReplacementModal(null);
+    await loadData();
+  };
+
+  const deleteRemplacement = async (id) => {
+    if (!isAdmin) return;
+    await supabase.from('remplacements').delete().eq('id', id);
+    await loadData();
+  };
+
+  // ============================================
   // DÉTECTION DES INCOHÉRENCES
   // ============================================
   const getIncoherences = () => {
@@ -1066,7 +1092,6 @@ const AnesthesistScheduler = () => {
       const isHol = isHoliday(date);
 
       if (isWE) {
-        // Week-end: doit avoir exactement 1 personne d'astreinte WE
         const astreinteWE = shifts.astreinte_we || [];
         if (astreinteWE.length === 0) {
           incoherences.push({
@@ -1079,12 +1104,11 @@ const AnesthesistScheduler = () => {
           incoherences.push({
             date: dateStr,
             type: 'multiple_astreinte_we',
-            message: `${astreinteWE.length} personnes d'astreinte WE (devrait être 1)`,
-            severity: 'error'
+            message: `${astreinteWE.length} personnes d'astreinte WE`,
+            severity: 'warning'
           });
         }
       } else if (isHol) {
-        // Jour férié: doit avoir 1 astreinte férié
         const astreinteFerie = shifts.astreinte_ferie || [];
         if (astreinteFerie.length === 0) {
           incoherences.push({
@@ -1093,21 +1117,12 @@ const AnesthesistScheduler = () => {
             message: 'Jour férié sans astreinte',
             severity: 'error'
           });
-        } else if (astreinteFerie.length > 1) {
-          incoherences.push({
-            date: dateStr,
-            type: 'multiple_astreinte_ferie',
-            message: `${astreinteFerie.length} personnes d'astreinte férié (devrait être 1)`,
-            severity: 'error'
-          });
         }
       } else {
-        // Jour de semaine: vérifier le schéma classique
         const astreinte = shifts.astreinte || [];
         const bloc = shifts.bloc || [];
         const consultation = shifts.consultation || [];
 
-        // Doit avoir 1 astreinte
         if (astreinte.length === 0) {
           incoherences.push({
             date: dateStr,
@@ -1115,43 +1130,33 @@ const AnesthesistScheduler = () => {
             message: 'Pas d\'astreinte assignée',
             severity: 'error'
           });
-        } else if (astreinte.length > 1) {
-          incoherences.push({
-            date: dateStr,
-            type: 'multiple_astreinte',
-            message: `${astreinte.length} personnes d'astreinte (devrait être 1)`,
-            severity: 'warning'
-          });
         }
 
-        // Doit avoir 2 blocs
         if (bloc.length < 2) {
           incoherences.push({
             date: dateStr,
             type: 'missing_bloc',
-            message: `Seulement ${bloc.length} bloc(s) (devrait être 2)`,
+            message: `Seulement ${bloc.length} bloc(s) (besoin 2)`,
             severity: 'warning'
           });
         }
 
-        // Doit avoir 1 consultation
         if (consultation.length === 0) {
           incoherences.push({
             date: dateStr,
             type: 'missing_consultation',
-            message: 'Pas de consultation assignée',
+            message: 'Pas de consultation',
             severity: 'warning'
           });
         }
 
-        // Vérifier que la personne d'astreinte est aussi au bloc
         if (astreinte.length > 0 && bloc.length > 0) {
           const astreinteAlsoBloc = astreinte.some(id => bloc.includes(id));
           if (!astreinteAlsoBloc) {
             incoherences.push({
               date: dateStr,
               type: 'astreinte_not_in_bloc',
-              message: 'La personne d\'astreinte n\'est pas au bloc',
+              message: 'Astreinte pas au bloc',
               severity: 'warning'
             });
           }
@@ -1159,11 +1164,54 @@ const AnesthesistScheduler = () => {
       }
     });
 
-    // Trier par date
     return incoherences.sort((a, b) => a.date.localeCompare(b.date));
   };
 
   const incoherenceCount = getIncoherences().length;
+
+  // ============================================
+  // CALCUL DES STATS AVEC REMPLACEMENTS
+  // ============================================
+  const calculateFullStats = () => {
+    const stats = anesthesists.filter(a => a.role !== 'viewer').map(a => ({
+      ...a, 
+      bloc: 0, 
+      consultation: 0, 
+      astreinte: 0, 
+      we: 0, 
+      ferie: 0, 
+      total: 0,
+      joursRemplaces: 0,
+      etp: a.etp || 0.5
+    }));
+
+    // Compter les jours travaillés
+    Object.entries(schedule).forEach(([dateKey, shifts]) => {
+      Object.entries(shifts).forEach(([shift, ids]) => {
+        ids.forEach(id => {
+          const stat = stats.find(s => s.id === id);
+          if (stat) {
+            stat.total++;
+            if (shift === 'bloc') stat.bloc++;
+            else if (shift === 'consultation') stat.consultation++;
+            else if (shift === 'astreinte') stat.astreinte++;
+            else if (shift === 'astreinte_we') stat.we++;
+            else if (shift === 'astreinte_ferie') stat.ferie++;
+          }
+        });
+      });
+    });
+
+    // Compter les jours remplacés
+    remplacements.forEach(r => {
+      const stat = stats.find(s => s.id === r.titulaire_id);
+      if (stat) {
+        stat.joursRemplaces++;
+      }
+    });
+
+    return stats;
+  };
 
   const transferAdmin = async (newAdminId) => {
     if (!window.confirm('Êtes-vous sûr de vouloir transférer le rôle admin ?')) return;
@@ -1288,6 +1336,7 @@ const AnesthesistScheduler = () => {
           {[
             { id: 'dashboard', icon: Home, label: 'Tableau de bord', show: !isViewer },
             { id: 'planning', icon: Calendar, label: 'Planning', show: true },
+            { id: 'stats', icon: BarChart3, label: 'Statistiques', show: true },
             { id: 'incoherences', icon: AlertTriangle, label: 'Incohérences', show: true, badge: incoherenceCount },
             { id: 'remplacants', icon: UserPlus, label: 'Remplaçants', show: true },
             { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges', show: !isViewer },
@@ -1333,6 +1382,7 @@ const AnesthesistScheduler = () => {
           <h1 className="text-xl font-bold" style={{ color: theme.gray[800] }}>
             {currentView === 'dashboard' && 'Tableau de bord'}
             {currentView === 'planning' && 'Planning'}
+            {currentView === 'stats' && 'Statistiques'}
             {currentView === 'incoherences' && 'Détection des incohérences'}
             {currentView === 'remplacants' && 'Liste des remplaçants'}
             {currentView === 'exchange' && 'Bourse aux échanges'}
@@ -1560,14 +1610,17 @@ const AnesthesistScheduler = () => {
                                   onChange={(e) => {
                                     if (!e.target.value) return;
                                     if (e.target.value.startsWith('r_')) {
-                                      // Remplaçant - pour l'instant on affiche juste une alerte
-                                      // TODO: implémenter l'assignation des remplaçants
+                                      // Remplaçant - ouvrir modal pour choisir qui est remplacé
                                       const remplacantId = parseInt(e.target.value.substring(2));
-                                      const remplacant = remplacants.find(r => r.id === remplacantId);
-                                      alert(`Remplaçant sélectionné : ${remplacant?.name}\n\nPour assigner un remplaçant, il faut d'abord le créer comme compte temporaire.`);
+                                      setReplacementModal({
+                                        date: formatDateKey(d),
+                                        shift,
+                                        remplacantId
+                                      });
                                     } else {
                                       toggleAssignment(d, parseInt(e.target.value), shift);
                                     }
+                                    e.target.value = '';
                                   }}
                                 >
                                   <option value="">+ Ajouter</option>
@@ -1634,13 +1687,10 @@ const AnesthesistScheduler = () => {
                     <button 
                       key={a.id} 
                       onClick={() => { 
-                        // Si tous sont sélectionnés, on sélectionne uniquement celui cliqué
-                        // Sinon, on ajoute/retire de la sélection
-                        const allSelected = selectedFilters.size === anesthesists.filter(x => x.role !== 'viewer').length + 1; // +1 pour remplaçants
+                        const allSelected = selectedFilters.size === anesthesists.filter(x => x.role !== 'viewer').length + 1;
                         if (allSelected) {
                           setSelectedFilters(new Set([a.id]));
                         } else if (selectedFilters.has(a.id) && selectedFilters.size === 1) {
-                          // Si c'est le dernier sélectionné, remettre tous
                           setSelectedFilters(new Set([...anesthesists.filter(x => x.role !== 'viewer').map(x => x.id), 'remplacants']));
                         } else if (selectedFilters.has(a.id)) {
                           const f = new Set(selectedFilters);
@@ -1682,6 +1732,92 @@ const AnesthesistScheduler = () => {
               </div>
             </div>
           )}
+
+          {/* STATISTIQUES */}
+          {currentView === 'stats' && (
+            <div>
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="font-bold mb-6" style={{ color: theme.gray[800] }}>Récapitulatif par anesthésiste</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>ETP</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Blocs</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Consult.</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Astreintes</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>WE</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Fériés</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Total</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.danger }}>Remplacé</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calculateFullStats().map(stat => (
+                        <tr key={stat.id} className="border-b hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stat.color }} />
+                              <span className="font-medium">{stat.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center text-sm">{Math.round(stat.etp * 100)}%</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.bloc}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.consultation}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.astreinte}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.we}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.ferie}</td>
+                          <td className="px-4 py-3 text-center text-sm font-bold">{stat.total}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded text-sm font-medium ${
+                              stat.joursRemplaces > 5 ? 'bg-red-100 text-red-700' : 
+                              stat.joursRemplaces > 2 ? 'bg-yellow-100 text-yellow-700' : 
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {stat.joursRemplaces} j
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Détail des remplacements */}
+              {remplacements.length > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
+                  <h3 className="font-bold mb-4" style={{ color: theme.gray[800] }}>Historique des remplacements</h3>
+                  <div className="space-y-2">
+                    {remplacements.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20).map(r => {
+                      const titulaire = anesthesists.find(a => a.id === r.titulaire_id);
+                      return (
+                        <div key={r.id} className="flex items-center justify-between p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                          <div>
+                            <span className="font-medium">{new Date(r.date).toLocaleDateString('fr-FR')}</span>
+                            <span className="mx-2">-</span>
+                            <span className="text-sm" style={{ color: theme.gray[600] }}>
+                              {r.remplacant_name} remplace <strong>{titulaire?.name || '?'}</strong>
+                            </span>
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded" style={{ backgroundColor: theme.gray[200] }}>
+                              {getShiftLabel(r.shift)}
+                            </span>
+                          </div>
+                          {isAdmin && (
+                            <button onClick={() => deleteRemplacement(r.id)} className="p-1 rounded hover:bg-red-100" style={{ color: theme.danger }}>
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* INCOHÉRENCES */}
           {currentView === 'incoherences' && (
             <div>
@@ -1722,16 +1858,9 @@ const AnesthesistScheduler = () => {
                             <div className="flex items-center justify-between">
                               <div>
                                 <div className="font-semibold" style={{ color: theme.gray[800] }}>
-                                  {date.toLocaleDateString('fr-FR', { 
-                                    weekday: 'long', 
-                                    day: 'numeric', 
-                                    month: 'long',
-                                    year: 'numeric'
-                                  })}
+                                  {date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                                 </div>
-                                <div className={`text-sm ${
-                                  inc.severity === 'error' ? 'text-red-700' : 'text-yellow-700'
-                                }`}>
+                                <div className={`text-sm ${inc.severity === 'error' ? 'text-red-700' : 'text-yellow-700'}`}>
                                   {inc.message}
                                 </div>
                               </div>
@@ -1826,6 +1955,7 @@ const AnesthesistScheduler = () => {
               </div>
             </div>
           )}
+
           {/* BOURSE AUX ÉCHANGES */}
           {currentView === 'exchange' && !isViewer && (
             <div>
@@ -1995,7 +2125,7 @@ const AnesthesistScheduler = () => {
 
               {/* Comptes consultation */}
               <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-6">
-                <h3 className="font-bold mb-2" style={{ color: theme.gray[800] }}>Comptes en consultation seule</h3>
+                <h3 className="font-bold mb-2" style={{ color: theme.gray[800] }}>💡 Comptes en consultation seule</h3>
                 <p className="text-sm mb-4" style={{ color: theme.gray[600] }}>
                   Ces comptes peuvent uniquement consulter le planning, sans possibilité de modification.
                 </p>
@@ -2033,11 +2163,11 @@ const AnesthesistScheduler = () => {
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h3 className="font-bold mb-4">Jours fériés {new Date().getFullYear()}</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {getHolidaysForYear(new Date().getFullYear()).map(h => (
+                <h3 className="font-bold mb-4">Jours fériés {new Date().getFullYear()} / {new Date().getFullYear() + 1}</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {[...getHolidaysForYear(new Date().getFullYear()), ...getHolidaysForYear(new Date().getFullYear() + 1)].map(h => (
                     <div key={h.date} className="p-2 rounded-lg text-sm" style={{ backgroundColor: theme.gray[50] }}>
-                      <span className="font-medium">{new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
+                      <span className="font-medium">{new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
                       <span className="ml-2" style={{ color: theme.gray[500] }}>{h.name}</span>
                     </div>
                   ))}
@@ -2446,6 +2576,43 @@ const AnesthesistScheduler = () => {
                 style={{ backgroundColor: theme.primary }}
               >
                 Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REMPLACEMENT - Choix du titulaire remplacé */}
+      {replacementModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">Qui est remplacé ?</h2>
+              <button onClick={() => setReplacementModal(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
+                <strong>{remplacants.find(r => r.id === replacementModal.remplacantId)?.name}</strong> remplace qui pour le <strong>{getShiftLabel(replacementModal.shift)}</strong> du <strong>{new Date(replacementModal.date).toLocaleDateString('fr-FR')}</strong> ?
+              </p>
+              <div className="space-y-2">
+                {anesthesists.filter(a => a.role !== 'viewer').map(a => (
+                  <button
+                    key={a.id}
+                    onClick={() => addRemplacement(replacementModal.date, replacementModal.shift, replacementModal.remplacantId, a.id)}
+                    className="w-full p-3 rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center gap-3 text-left"
+                  >
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: a.color }} />
+                    <span>{a.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="p-6 border-t">
+              <button
+                onClick={() => setReplacementModal(null)}
+                className="w-full px-4 py-2 border rounded-xl hover:bg-gray-50"
+              >
+                Annuler
               </button>
             </div>
           </div>
