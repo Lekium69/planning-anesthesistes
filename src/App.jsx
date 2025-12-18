@@ -517,9 +517,12 @@ const AnesthesistScheduler = () => {
         supabase.from('unavailabilities').select('*'),
       ]);
 
+      // Préparer les anesthésistes avec couleurs (déclaré en dehors du if)
+      let anesthWithColors = [];
+      
       if (anesth.data) {
         // Appliquer les couleurs distinctes
-        const anesthWithColors = anesth.data.map((a, index) => ({
+        anesthWithColors = anesth.data.map((a, index) => ({
           ...a,
           color: DISTINCT_COLORS[index % DISTINCT_COLORS.length]
         }));
