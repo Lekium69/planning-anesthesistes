@@ -1736,12 +1736,21 @@ const AnesthesistScheduler = () => {
           {/* STATISTIQUES */}
           {currentView === 'stats' && (
             <div>
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h3 className="font-bold mb-6" style={{ color: theme.gray[800] }}>Récapitulatif par anesthésiste</h3>
+              {/* Tableau des TITULAIRES */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.primary }}>
+                    <Users className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold" style={{ color: theme.gray[800] }}>Anesthésistes titulaires</h3>
+                    <p className="text-sm" style={{ color: theme.gray[500] }}>Médecins permanents de l'équipe</p>
+                  </div>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b">
+                      <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
                         <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>ETP</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Blocs</th>
@@ -1750,11 +1759,11 @@ const AnesthesistScheduler = () => {
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>WE</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Fériés</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Total</th>
-                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.danger }}>Remplacé</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.danger }}>Jours remplacé</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {calculateFullStats().map(stat => (
+                      {calculateFullStats().filter(stat => stat.etp >= 0.2).map(stat => (
                         <tr key={stat.id} className="border-b hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -1780,6 +1789,66 @@ const AnesthesistScheduler = () => {
                           </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* SÉPARATION */}
+              <div className="flex items-center gap-4 my-8">
+                <div className="flex-1 h-px" style={{ backgroundColor: theme.gray[300] }}></div>
+                <span className="text-sm font-medium px-4" style={{ color: theme.gray[500] }}>⬇️ Remplaçants ⬇️</span>
+                <div className="flex-1 h-px" style={{ backgroundColor: theme.gray[300] }}></div>
+              </div>
+
+              {/* Tableau des REMPLAÇANTS */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6" style={{ borderColor: theme.gray[300] }}>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.gray[600] }}>
+                    <UserPlus className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold" style={{ color: theme.gray[800] }}>Remplaçants</h3>
+                    <p className="text-sm" style={{ color: theme.gray[500] }}>Médecins ayant effectué des remplacements</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b" style={{ backgroundColor: theme.gray[100] }}>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Blocs</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Consult.</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Astreintes</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>WE</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Fériés</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Total jours</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calculateFullStats().filter(stat => stat.etp < 0.2 && stat.total > 0).map(stat => (
+                        <tr key={stat.id} className="border-b hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: theme.gray[400] }} />
+                              <span className="font-medium">{stat.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.bloc}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.consultation}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.astreinte}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.we}</td>
+                          <td className="px-4 py-3 text-center text-sm">{stat.ferie}</td>
+                          <td className="px-4 py-3 text-center text-sm font-bold">{stat.total}</td>
+                        </tr>
+                      ))}
+                      {calculateFullStats().filter(stat => stat.etp < 0.2 && stat.total > 0).length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>
+                            Aucun remplaçant n'a encore travaillé
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
