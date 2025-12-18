@@ -547,6 +547,7 @@ const AnesthesistScheduler = () => {
 
       if (sched.data) {
         const scheduleMap = {};
+        let remplacantCount = 0;
         sched.data.forEach(item => {
           if (!scheduleMap[item.date]) scheduleMap[item.date] = {};
           if (!scheduleMap[item.date][item.shift]) scheduleMap[item.date][item.shift] = [];
@@ -556,6 +557,8 @@ const AnesthesistScheduler = () => {
             scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
           } else if (item.remplacant_name) {
             // C'est un remplaçant
+            remplacantCount++;
+            console.log('Remplaçant trouvé:', item.date, item.shift, item.remplacant_name);
             scheduleMap[item.date][item.shift].push({ 
               type: 'remplacant', 
               name: item.remplacant_name, 
@@ -563,6 +566,7 @@ const AnesthesistScheduler = () => {
             });
           }
         });
+        console.log('Total remplaçants dans schedule:', remplacantCount);
         setSchedule(scheduleMap);
       }
 
