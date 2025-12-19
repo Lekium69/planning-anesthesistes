@@ -509,7 +509,7 @@ const AnesthesistScheduler = () => {
         supabase.from('anesthesists').select('*').order('id'),
         supabase.from('remplacants').select('*').eq('actif', true).order('name'),
         supabase.from('remplacements').select('*'),
-        supabase.from('schedule').select('id, date, shift, anesthesist_id, remplacant_name, year'),
+        supabase.from('schedule').select('id, date, shift, anesthesist_id, remplacant_name, year').limit(5000),
         supabase.from('holidays').select('*'),
         supabase.from('notifications').select('*, swap_request:swap_requests(*)').order('created_at', { ascending: false }),
         supabase.from('swap_requests').select('*'),
