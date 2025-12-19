@@ -520,6 +520,8 @@ const AnesthesistScheduler = () => {
       // Debug: voir ce que retourne schedule
       console.log('Schedule data sample:', sched.data?.slice(0, 3));
       console.log('Schedule avec remplacant_name:', sched.data?.filter(s => s.remplacant_name));
+      console.log('Entrées du 11 février:', sched.data?.filter(s => s.date === '2026-02-11'));
+      console.log('Toutes les clés d un item:', sched.data?.[0] ? Object.keys(sched.data[0]) : 'vide');
 
       if (anesth.data) {
         // Appliquer les couleurs distinctes
