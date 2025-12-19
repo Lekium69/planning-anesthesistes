@@ -509,7 +509,7 @@ const AnesthesistScheduler = () => {
         supabase.from('anesthesists').select('*').order('id'),
         supabase.from('remplacants').select('*').eq('actif', true).order('name'),
         supabase.from('remplacements').select('*'),
-        supabase.from('schedule').select('id, date, shift, anesthesist_id, remplacant_name, year'),
+        supabase.from('schedule').select('*').order('id', { ascending: false }).limit(2000),
         supabase.from('holidays').select('*'),
         supabase.from('notifications').select('*, swap_request:swap_requests(*)').order('created_at', { ascending: false }),
         supabase.from('swap_requests').select('*'),
@@ -518,8 +518,12 @@ const AnesthesistScheduler = () => {
       ]);
 
       // Debug: voir ce que retourne schedule
-      console.log('Schedule data sample:', sched.data?.slice(0, 3));
+      console.log('Nombre total entrées schedule:', sched.data?.length);
+      console.log('Erreur schedule:', sched.error);
+      console.log('Premier item complet:', JSON.stringify(sched.data?.[0]));
       console.log('Schedule avec remplacant_name:', sched.data?.filter(s => s.remplacant_name));
+      console.log('Entrées du 11 février:', sched.data?.filter(s => s.date === '2026-02-11'));
+      console.log('Entrées avec anesthesist_id NULL:', sched.data?.filter(s => s.anesthesist_id === null));
 
       if (anesth.data) {
         // Appliquer les couleurs distinctes
