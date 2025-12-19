@@ -509,13 +509,17 @@ const AnesthesistScheduler = () => {
         supabase.from('anesthesists').select('*').order('id'),
         supabase.from('remplacants').select('*').eq('actif', true).order('name'),
         supabase.from('remplacements').select('*'),
-        supabase.from('schedule').select('*'),
+        supabase.from('schedule').select('id, date, shift, anesthesist_id, remplacant_name, year'),
         supabase.from('holidays').select('*'),
         supabase.from('notifications').select('*, swap_request:swap_requests(*)').order('created_at', { ascending: false }),
         supabase.from('swap_requests').select('*'),
         supabase.from('exchange_board').select('*').order('created_at', { ascending: false }),
         supabase.from('unavailabilities').select('*'),
       ]);
+
+      // Debug: voir ce que retourne schedule
+      console.log('Schedule data sample:', sched.data?.slice(0, 3));
+      console.log('Schedule avec remplacant_name:', sched.data?.filter(s => s.remplacant_name));
 
       if (anesth.data) {
         // Appliquer les couleurs distinctes
