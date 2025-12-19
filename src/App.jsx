@@ -518,12 +518,6 @@ const AnesthesistScheduler = () => {
       ]);
 
       // Debug: voir ce que retourne schedule
-      console.log('Nombre total entrées schedule:', sched.data?.length);
-      console.log('Erreur schedule:', sched.error);
-      console.log('Premier item complet:', JSON.stringify(sched.data?.[0]));
-      console.log('Schedule avec remplacant_name:', sched.data?.filter(s => s.remplacant_name));
-      console.log('Entrées du 11 février:', sched.data?.filter(s => s.date === '2026-02-11'));
-      console.log('Entrées avec anesthesist_id NULL:', sched.data?.filter(s => s.anesthesist_id === null));
 
       if (anesth.data) {
         // Appliquer les couleurs distinctes
@@ -555,7 +549,6 @@ const AnesthesistScheduler = () => {
 
       if (sched.data) {
         const scheduleMap = {};
-        let remplacantCount = 0;
         sched.data.forEach(item => {
           if (!scheduleMap[item.date]) scheduleMap[item.date] = {};
           if (!scheduleMap[item.date][item.shift]) scheduleMap[item.date][item.shift] = [];
@@ -565,8 +558,6 @@ const AnesthesistScheduler = () => {
             scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
           } else if (item.remplacant_name) {
             // C'est un remplaçant
-            remplacantCount++;
-            console.log('Remplaçant trouvé:', item.date, item.shift, item.remplacant_name);
             scheduleMap[item.date][item.shift].push({ 
               type: 'remplacant', 
               name: item.remplacant_name, 
@@ -574,7 +565,6 @@ const AnesthesistScheduler = () => {
             });
           }
         });
-        console.log('Total remplaçants dans schedule:', remplacantCount);
         setSchedule(scheduleMap);
       }
 
@@ -688,9 +678,6 @@ const AnesthesistScheduler = () => {
         endDate.setMonth(endDate.getMonth() + 18);
       }
 
-      console.log('=== DÉBUT GÉNÉRATION ===');
-      console.log('Mode:', mode);
-      console.log('Du:', formatDateKey(startDate), 'au:', formatDateKey(endDate));
 
       // Anesthésistes actifs
       const activeAnesth = anesthesists.filter(a => a.role !== 'viewer');
@@ -719,7 +706,6 @@ const AnesthesistScheduler = () => {
         .lt('date', formatDateKey(startDate));
 
       if (pastSchedule) {
-        console.log(`Chargement de ${pastSchedule.length} entrées passées pour équilibrage`);
         const countedWE = new Set(); // Pour ne pas compter 2x sam+dim
         pastSchedule.forEach(entry => {
           if (stats[entry.anesthesist_id]) {
@@ -733,7 +719,6 @@ const AnesthesistScheduler = () => {
             else if (entry.shift === 'astreinte_ferie') stats[entry.anesthesist_id].ferie++;
           }
         });
-        console.log('Stats WE/fériés passés:', Object.entries(stats).map(([id, s]) => `${id}: WE=${s.we}, Fériés=${s.ferie}`));
       }
 
       // Supprimer les entrées dans la plage
@@ -801,7 +786,6 @@ const AnesthesistScheduler = () => {
         currentMonday.setDate(currentMonday.getDate() + 7);
       }
 
-      console.log(`${weeks.length} semaines à planifier`);
 
       // ============================================
       // PRIORITÉ 1 + 2 + 3: ASSIGNER PAR SEMAINE COMPLÈTE
@@ -856,7 +840,6 @@ const AnesthesistScheduler = () => {
         stats[personC.id].semaines++;
         stats[personB.id].we++; // B fait le WE
 
-        console.log(`Semaine ${week.weekKey}: A=${personA.name.split(' ')[1]}, B=${personB.name.split(' ')[1]} (WE), C=${personC.name.split(' ')[1]}`);
 
         // ============================================
         // GÉNÉRER LES JOURS DE LA SEMAINE
@@ -915,8 +898,6 @@ const AnesthesistScheduler = () => {
         }
       }
 
-      console.log('Entrées générées:', inserts.length);
-      console.log('Stats finales:', stats);
 
       // Insérer par batch
       for (let i = 0; i < inserts.length; i += 500) {
@@ -926,7 +907,6 @@ const AnesthesistScheduler = () => {
           console.error('Erreur batch', i, ':', error);
           throw error;
         }
-        console.log('Batch', i/500 + 1, 'inséré');
       }
 
       // Historique
@@ -1173,6 +1153,9 @@ const AnesthesistScheduler = () => {
       const isWE = isWeekend(date);
       const isHol = isHoliday(date);
 
+      // Helper pour extraire les IDs des titulaires
+      const getIds = (entries) => entries?.filter(e => e.type === 'titulaire').map(e => e.id) || [];
+
       if (isWE) {
         const astreinteWE = shifts.astreinte_we || [];
         if (astreinteWE.length === 0) {
@@ -1232,8 +1215,11 @@ const AnesthesistScheduler = () => {
           });
         }
 
+        // Vérifier que l'astreinte est aussi au bloc (comparer les IDs)
         if (astreinte.length > 0 && bloc.length > 0) {
-          const astreinteAlsoBloc = astreinte.some(id => bloc.includes(id));
+          const astreinteIds = getIds(astreinte);
+          const blocIds = getIds(bloc);
+          const astreinteAlsoBloc = astreinteIds.some(id => blocIds.includes(id));
           if (!astreinteAlsoBloc) {
             incoherences.push({
               date: dateStr,
