@@ -1182,6 +1182,14 @@ const AnesthesistScheduler = () => {
             message: 'Jour férié sans astreinte',
             severity: 'error'
           });
+        } else if (astreinteFerie.length > 1) {
+          // Nouveau check: plus d'une personne sur un jour férié
+          incoherences.push({
+            date: dateStr,
+            type: 'multiple_astreinte_ferie',
+            message: `${astreinteFerie.length} personnes d'astreinte férié`,
+            severity: 'warning'
+          });
         }
       } else {
         const astreinte = shifts.astreinte || [];
@@ -1215,17 +1223,43 @@ const AnesthesistScheduler = () => {
           });
         }
 
-        // Vérifier que l'astreinte est aussi au bloc (comparer les IDs)
+        // Vérifier que l'astreinte est aussi au bloc (titulaires OU remplaçants)
         if (astreinte.length > 0 && bloc.length > 0) {
           const astreinteIds = getIds(astreinte);
           const blocIds = getIds(bloc);
-          const astreinteAlsoBloc = astreinteIds.some(id => blocIds.includes(id));
-          if (!astreinteAlsoBloc) {
+          // Vérifier aussi les remplaçants par nom
+          const astreinteRemplacants = astreinte.filter(e => e.type === 'remplacant').map(e => e.name);
+          const blocRemplacants = bloc.filter(e => e.type === 'remplacant').map(e => e.name);
+          
+          const titulaireMatch = astreinteIds.some(id => blocIds.includes(id));
+          const remplacantMatch = astreinteRemplacants.some(name => blocRemplacants.includes(name));
+          
+          if (!titulaireMatch && !remplacantMatch) {
             incoherences.push({
               date: dateStr,
               type: 'astreinte_not_in_bloc',
               message: 'Astreinte pas au bloc',
               severity: 'warning'
+            });
+          }
+        }
+
+        // Nouveau check: même personne au bloc et en consultation
+        if (bloc.length > 0 && consultation.length > 0) {
+          const blocIds = getIds(bloc);
+          const consultationIds = getIds(consultation);
+          const blocRemplacants = bloc.filter(e => e.type === 'remplacant').map(e => e.name);
+          const consultationRemplacants = consultation.filter(e => e.type === 'remplacant').map(e => e.name);
+          
+          const sameTitulaire = blocIds.some(id => consultationIds.includes(id));
+          const sameRemplacant = blocRemplacants.some(name => consultationRemplacants.includes(name));
+          
+          if (sameTitulaire || sameRemplacant) {
+            incoherences.push({
+              date: dateStr,
+              type: 'bloc_and_consultation_same_person',
+              message: 'Même personne au bloc et en consultation',
+              severity: 'error'
             });
           }
         }
@@ -1237,10 +1271,13 @@ const AnesthesistScheduler = () => {
 
   const incoherenceCount = getIncoherences().length;
 
+  // State pour la période des stats
+  const [statsPeriod, setStatsPeriod] = useState({ start: '', end: '' });
+
   // ============================================
   // CALCUL DES STATS AVEC REMPLACEMENTS
   // ============================================
-  const calculateFullStats = () => {
+  const calculateFullStats = (startDate = null, endDate = null) => {
     // Stats pour les titulaires
     const titulairesStats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
       ...a, 
@@ -1255,11 +1292,22 @@ const AnesthesistScheduler = () => {
       isTitulaire: true
     }));
 
-    // Stats pour les remplaçants (depuis la table remplacements)
+    // Stats pour les remplaçants
     const remplacantsStatsMap = {};
     
     // Compter les jours travaillés
     Object.entries(schedule).forEach(([dateKey, shifts]) => {
+      // Filtrer par période si définie
+      if (startDate && dateKey < startDate) return;
+      if (endDate && dateKey > endDate) return;
+
+      const date = new Date(dateKey);
+      const isWE = isWeekend(date);
+      const isHol = isHoliday(date);
+      
+      // Si férié dans un WE, ne pas compter le férié (seulement le WE)
+      const isFerieInWE = isHol && isWE;
+
       Object.entries(shifts).forEach(([shift, entries]) => {
         entries.forEach(entry => {
           if (entry.type === 'titulaire') {
@@ -1270,10 +1318,12 @@ const AnesthesistScheduler = () => {
               else if (shift === 'consultation') stat.consultation++;
               else if (shift === 'astreinte') stat.astreinte++;
               else if (shift === 'astreinte_we') stat.we++;
-              else if (shift === 'astreinte_ferie') stat.ferie++;
+              else if (shift === 'astreinte_ferie') {
+                // Ne pas compter le férié s'il est dans un WE
+                if (!isFerieInWE) stat.ferie++;
+              }
             }
           } else if (entry.type === 'remplacant') {
-            // Compter les stats des remplaçants
             if (!remplacantsStatsMap[entry.name]) {
               remplacantsStatsMap[entry.name] = {
                 id: `rempl_${entry.name}`,
@@ -1291,14 +1341,19 @@ const AnesthesistScheduler = () => {
             else if (shift === 'consultation') stat.consultation++;
             else if (shift === 'astreinte') stat.astreinte++;
             else if (shift === 'astreinte_we') stat.we++;
-            else if (shift === 'astreinte_ferie') stat.ferie++;
+            else if (shift === 'astreinte_ferie') {
+              if (!isFerieInWE) stat.ferie++;
+            }
           }
         });
       });
     });
 
-    // Compter les jours remplacés pour les titulaires
+    // Compter les jours remplacés pour les titulaires (filtré par période)
     remplacements.forEach(r => {
+      if (startDate && r.date < startDate) return;
+      if (endDate && r.date > endDate) return;
+      
       const stat = titulairesStats.find(s => s.id === r.titulaire_id);
       if (stat) {
         stat.joursRemplaces++;
@@ -1959,6 +2014,37 @@ const AnesthesistScheduler = () => {
           {/* STATISTIQUES */}
           {currentView === 'stats' && (
             <div>
+              {/* Filtres de période */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-6">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <span className="text-sm font-medium" style={{ color: theme.gray[600] }}>Période :</span>
+                  <input
+                    type="date"
+                    value={statsPeriod.start}
+                    onChange={(e) => setStatsPeriod(p => ({ ...p, start: e.target.value }))}
+                    className="px-3 py-1.5 border rounded-lg text-sm"
+                    style={{ borderColor: theme.gray[300] }}
+                  />
+                  <span style={{ color: theme.gray[400] }}>→</span>
+                  <input
+                    type="date"
+                    value={statsPeriod.end}
+                    onChange={(e) => setStatsPeriod(p => ({ ...p, end: e.target.value }))}
+                    className="px-3 py-1.5 border rounded-lg text-sm"
+                    style={{ borderColor: theme.gray[300] }}
+                  />
+                  {(statsPeriod.start || statsPeriod.end) && (
+                    <button
+                      onClick={() => setStatsPeriod({ start: '', end: '' })}
+                      className="text-xs px-3 py-1.5 rounded-lg"
+                      style={{ backgroundColor: theme.gray[100], color: theme.gray[600] }}
+                    >
+                      Réinitialiser
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Tableau des TITULAIRES */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <div className="flex items-center gap-3 mb-6">
@@ -1986,7 +2072,7 @@ const AnesthesistScheduler = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {calculateFullStats().filter(stat => stat.isTitulaire).map(stat => (
+                      {calculateFullStats(statsPeriod.start || null, statsPeriod.end || null).filter(stat => stat.isTitulaire).map(stat => (
                         <tr key={stat.id} className="border-b hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -2049,7 +2135,7 @@ const AnesthesistScheduler = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {calculateFullStats().filter(stat => !stat.isTitulaire && stat.total > 0).map(stat => (
+                      {calculateFullStats(statsPeriod.start || null, statsPeriod.end || null).filter(stat => !stat.isTitulaire && stat.total > 0).map(stat => (
                         <tr key={stat.id} className="border-b hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -2065,7 +2151,7 @@ const AnesthesistScheduler = () => {
                           <td className="px-4 py-3 text-center text-sm font-bold">{stat.total}</td>
                         </tr>
                       ))}
-                      {calculateFullStats().filter(stat => !stat.isTitulaire && stat.total > 0).length === 0 && (
+                      {calculateFullStats(statsPeriod.start || null, statsPeriod.end || null).filter(stat => !stat.isTitulaire && stat.total > 0).length === 0 && (
                         <tr>
                           <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>
                             Aucun remplaçant n'a encore travaillé
@@ -2078,11 +2164,17 @@ const AnesthesistScheduler = () => {
               </div>
 
               {/* Détail des remplacements */}
-              {remplacements.length > 0 && (
+              {(() => {
+                const filteredRemplacements = remplacements.filter(r => {
+                  if (statsPeriod.start && r.date < statsPeriod.start) return false;
+                  if (statsPeriod.end && r.date > statsPeriod.end) return false;
+                  return true;
+                });
+                return filteredRemplacements.length > 0 && (
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
-                  <h3 className="font-bold mb-4" style={{ color: theme.gray[800] }}>Historique des remplacements</h3>
+                  <h3 className="font-bold mb-4" style={{ color: theme.gray[800] }}>Détails des remplacements ({filteredRemplacements.length})</h3>
                   <div className="space-y-2">
-                    {remplacements.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20).map(r => {
+                    {filteredRemplacements.sort((a, b) => b.date.localeCompare(a.date)).map(r => {
                       const titulaire = anesthesists.find(a => a.id === r.titulaire_id);
                       return (
                         <div key={r.id} className="flex items-center justify-between p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
@@ -2106,7 +2198,8 @@ const AnesthesistScheduler = () => {
                     })}
                   </div>
                 </div>
-              )}
+              );
+              })()}
             </div>
           )}
 
