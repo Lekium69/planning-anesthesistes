@@ -460,6 +460,13 @@ const AnesthesistScheduler = () => {
   const [unavailabilities, setUnavailabilities] = useState([]);
   const [emailPreferences, setEmailPreferences] = useState({});
   
+  // IADES
+  const [iades, setIades] = useState([]);
+  const [scheduleIades, setScheduleIades] = useState({});
+  const [selectedIadesFilters, setSelectedIadesFilters] = useState(new Set());
+  const [iadesStatsPeriod, setIadesStatsPeriod] = useState({ start: '', end: '' });
+  const [editingIade, setEditingIade] = useState(null);
+  
   // Modals
   const [editingRemplacant, setEditingRemplacant] = useState(null);
   const [editingAnesth, setEditingAnesth] = useState(null);
@@ -505,7 +512,7 @@ const AnesthesistScheduler = () => {
     if (!user) return;
     
     try {
-      const [anesth, rempl, replmts, sched, hol, notif, swaps, exchange, unavail] = await Promise.all([
+      const [anesth, rempl, replmts, sched, hol, notif, swaps, exchange, unavail, iadesData, schedIades] = await Promise.all([
         supabase.from('anesthesists').select('*').order('id'),
         supabase.from('remplacants').select('*').eq('actif', true).order('name'),
         supabase.from('remplacements').select('*'),
@@ -515,6 +522,8 @@ const AnesthesistScheduler = () => {
         supabase.from('swap_requests').select('*'),
         supabase.from('exchange_board').select('*').order('created_at', { ascending: false }),
         supabase.from('unavailabilities').select('*'),
+        supabase.from('iades').select('*').order('name'),
+        supabase.from('schedule_iades').select('*').limit(100000),
       ]);
 
       // Debug: voir ce que retourne schedule
@@ -568,6 +577,39 @@ const AnesthesistScheduler = () => {
         setSchedule(scheduleMap);
       }
 
+      // Charger les IADES
+      if (iadesData.data) {
+        const iadesWithColors = iadesData.data.map((i, index) => ({
+          ...i,
+          color: i.is_titulaire ? '#059669' : '#6b7280' // Vert pour titulaires, gris pour remplaçants
+        }));
+        setIades(iadesWithColors);
+        // Initialiser les filtres IADES
+        if (selectedIadesFilters.size === 0) {
+          setSelectedIadesFilters(new Set(iadesWithColors.map(i => i.id)));
+        }
+      }
+
+      // Charger le planning IADES
+      if (schedIades.data) {
+        const scheduleIadesMap = {};
+        schedIades.data.forEach(item => {
+          if (!scheduleIadesMap[item.date]) scheduleIadesMap[item.date] = {};
+          if (!scheduleIadesMap[item.date][item.shift]) scheduleIadesMap[item.date][item.shift] = [];
+          
+          if (item.iade_id) {
+            scheduleIadesMap[item.date][item.shift].push({ type: 'titulaire', id: item.iade_id, scheduleId: item.id });
+          } else if (item.remplacant_name) {
+            scheduleIadesMap[item.date][item.shift].push({ 
+              type: 'remplacant', 
+              name: item.remplacant_name, 
+              scheduleId: item.id
+            });
+          }
+        });
+        setScheduleIades(scheduleIadesMap);
+      }
+
       if (hol.data) setHolidays(hol.data);
       if (notif.data) setNotifications(notif.data);
       if (swaps.data) setSwapRequests(swaps.data);
@@ -576,7 +618,7 @@ const AnesthesistScheduler = () => {
     } catch (error) {
       console.error('Erreur chargement données:', error);
     }
-  }, [user, selectedFilters.size]);
+  }, [user, selectedFilters.size, selectedIadesFilters.size]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -1143,6 +1185,109 @@ const AnesthesistScheduler = () => {
   };
 
   // ============================================
+  // FONCTIONS IADES
+  // ============================================
+  const addIade = async (iadeData) => {
+    if (!isAdmin) return;
+    const { error } = await supabase.from('iades').insert(iadeData);
+    if (!error) await loadData();
+    return error;
+  };
+
+  const updateIade = async (id, iadeData) => {
+    if (!isAdmin) return;
+    const { error } = await supabase.from('iades').update(iadeData).eq('id', id);
+    if (!error) await loadData();
+    return error;
+  };
+
+  const deleteIade = async (id) => {
+    if (!isAdmin) return;
+    await supabase.from('schedule_iades').delete().eq('iade_id', id);
+    await supabase.from('iades').delete().eq('id', id);
+    await loadData();
+  };
+
+  const assignIade = async (date, shift, iadeId, isRemplacant = false, remplacantName = null) => {
+    if (!isAdmin) return;
+    const dateKey = formatDateKey(date);
+    const year = new Date(date).getFullYear();
+    
+    const insertData = {
+      date: dateKey,
+      shift,
+      year,
+      iade_id: isRemplacant ? null : iadeId,
+      remplacant_name: isRemplacant ? remplacantName : null
+    };
+    
+    const { error } = await supabase.from('schedule_iades').insert(insertData);
+    if (!error) await loadData();
+    return error;
+  };
+
+  const removeIadeAssignment = async (scheduleId) => {
+    if (!isAdmin) return;
+    await supabase.from('schedule_iades').delete().eq('id', scheduleId);
+    await loadData();
+  };
+
+  const getAssignedIades = (date, shift) => {
+    const key = formatDateKey(date);
+    const entries = scheduleIades[key]?.[shift] || [];
+    
+    return entries.map(entry => {
+      if (entry.type === 'titulaire') {
+        const iade = iades.find(i => i.id === entry.id);
+        if (iade && selectedIadesFilters.has(iade.id)) {
+          return { ...iade, isRemplacant: false, scheduleId: entry.scheduleId };
+        }
+      } else if (entry.type === 'remplacant') {
+        return { 
+          id: `r_${entry.scheduleId}`, 
+          name: entry.name, 
+          color: '#6b7280', 
+          isRemplacant: true,
+          scheduleId: entry.scheduleId
+        };
+      }
+      return null;
+    }).filter(Boolean);
+  };
+
+  const calculateIadesStats = (startDate = null, endDate = null) => {
+    const stats = {};
+    
+    // Initialiser les stats pour tous les IADES
+    iades.forEach(iade => {
+      stats[iade.id] = {
+        ...iade,
+        total: 0,
+        journees: {}
+      };
+    });
+    
+    // Compter les jours travaillés
+    Object.entries(scheduleIades).forEach(([dateKey, shifts]) => {
+      if (startDate && dateKey < startDate) return;
+      if (endDate && dateKey > endDate) return;
+      
+      Object.entries(shifts).forEach(([shift, entries]) => {
+        entries.forEach(entry => {
+          if (entry.type === 'titulaire' && stats[entry.id]) {
+            if (!stats[entry.id].journees[dateKey]) {
+              stats[entry.id].journees[dateKey] = true;
+              stats[entry.id].total++;
+            }
+          }
+        });
+      });
+    });
+    
+    return Object.values(stats);
+  };
+
+  // ============================================
   // DÉTECTION DES INCOHÉRENCES
   // ============================================
   const getIncoherences = () => {
@@ -1517,11 +1662,19 @@ const AnesthesistScheduler = () => {
             { id: 'stats', icon: BarChart3, label: 'Statistiques', show: true },
             { id: 'incoherences', icon: AlertTriangle, label: 'Incohérences', show: true, badge: incoherenceCount },
             { id: 'remplacants', icon: UserPlus, label: 'Remplaçants', show: true },
+            { id: 'divider1', isDivider: true, show: true },
+            { id: 'iades-planning', icon: Calendar, label: '📋 IADES - Planning', show: true },
+            { id: 'iades-list', icon: Users, label: '👥 IADES - Équipe', show: true },
+            { id: 'iades-stats', icon: BarChart3, label: '📊 IADES - Stats', show: true },
+            { id: 'divider2', isDivider: true, show: true },
             { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges', show: !isViewer },
             { id: 'unavailabilities', icon: CalendarOff, label: 'Indisponibilités', show: !isViewer },
             { id: 'admin', icon: Shield, label: 'Administration', show: isAdmin },
             { id: 'settings', icon: Settings, label: 'Paramètres', show: !isViewer },
           ].filter(item => item.show).map(item => (
+            item.isDivider ? (
+              <div key={item.id} className="my-3 mx-4 border-t border-white/20" />
+            ) : (
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id)}
@@ -1535,6 +1688,7 @@ const AnesthesistScheduler = () => {
                 <span className="ml-auto bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full">{item.badge}</span>
               )}
             </button>
+            )
           ))}
         </nav>
 
@@ -1563,6 +1717,9 @@ const AnesthesistScheduler = () => {
             {currentView === 'stats' && 'Statistiques'}
             {currentView === 'incoherences' && 'Détection des incohérences'}
             {currentView === 'remplacants' && 'Liste des remplaçants'}
+            {currentView === 'iades-planning' && 'Planning IADES'}
+            {currentView === 'iades-list' && 'Équipe IADES'}
+            {currentView === 'iades-stats' && 'Statistiques IADES'}
             {currentView === 'exchange' && 'Bourse aux échanges'}
             {currentView === 'unavailabilities' && 'Mes indisponibilités'}
             {currentView === 'admin' && 'Administration'}
@@ -2686,6 +2843,385 @@ const AnesthesistScheduler = () => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================ */}
+      {/* VUES IADES */}
+      {/* ============================================ */}
+
+      {/* PLANNING IADES */}
+      {currentView === 'iades-planning' && (
+        <div className="p-8">
+          {/* Navigation semaine */}
+          <div className="flex items-center justify-center gap-4 mb-6">
+            <button onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <button onClick={() => setCurrentWeekStart(getMonday(new Date()))} className="px-4 py-2 rounded-xl hover:bg-gray-100 text-sm">Aujourd'hui</button>
+            <h2 className="text-lg font-semibold" style={{ color: theme.gray[800] }}>
+              Semaine {getWeekNumber(currentWeekStart)} - {currentWeekStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+            </h2>
+            <button onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100">
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Filtres IADES */}
+          <div className="mb-4 flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium" style={{ color: theme.gray[600] }}>Filtrer :</span>
+            {iades.filter(i => i.actif).map(iade => (
+              <button
+                key={iade.id}
+                onClick={() => {
+                  const f = new Set(selectedIadesFilters);
+                  if (f.has(iade.id)) f.delete(iade.id);
+                  else f.add(iade.id);
+                  setSelectedIadesFilters(f);
+                }}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selectedIadesFilters.has(iade.id) ? 'text-white' : ''}`}
+                style={selectedIadesFilters.has(iade.id) ? { backgroundColor: iade.color, borderColor: iade.color } : { borderColor: theme.gray[200], color: theme.gray[400] }}
+              >
+                {iade.name}
+              </button>
+            ))}
+            <button onClick={() => setSelectedIadesFilters(new Set(iades.map(i => i.id)))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+            <button onClick={() => setSelectedIadesFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
+          </div>
+
+          {/* Grille planning IADES */}
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+            <div className="grid grid-cols-7 border-b" style={{ backgroundColor: theme.gray[50] }}>
+              {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((day, i) => {
+                const d = new Date(currentWeekStart);
+                d.setDate(d.getDate() + i);
+                const isToday = formatDateKey(d) === formatDateKey(new Date());
+                return (
+                  <div key={i} className={`p-4 text-center border-r last:border-r-0 ${isToday ? 'bg-blue-50' : ''}`}>
+                    <div className="text-xs uppercase tracking-wider mb-1" style={{ color: theme.gray[500] }}>{day}</div>
+                    <div className={`text-2xl font-bold ${isToday ? 'text-blue-600' : ''}`} style={{ color: isToday ? undefined : theme.gray[800] }}>{d.getDate()}</div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Shifts IADES */}
+            {['matin', 'apres_midi', 'garde'].map(shift => (
+              <div key={shift} className="grid grid-cols-7 border-b last:border-b-0">
+                {[0, 1, 2, 3, 4, 5, 6].map(i => {
+                  const d = new Date(currentWeekStart);
+                  d.setDate(d.getDate() + i);
+                  const assigned = getAssignedIades(d, shift);
+                  
+                  return (
+                    <div key={i} className="p-2 border-r last:border-r-0 min-h-[100px]" style={{ backgroundColor: isWeekend(d) ? theme.gray[50] : 'white' }}>
+                      <div className="text-xs font-medium mb-2" style={{ color: theme.gray[500] }}>
+                        {shift === 'matin' ? '🌅 Matin' : shift === 'apres_midi' ? '☀️ Après-midi' : '🌙 Garde'}
+                      </div>
+                      <div className="space-y-1">
+                        {assigned.map(iade => (
+                          <div key={iade.id} className="flex items-center gap-1 group">
+                            <span className="px-2 py-1 rounded text-xs text-white truncate flex-1" style={{ backgroundColor: iade.color }}>
+                              {iade.isRemplacant ? '🔄 ' : ''}{iade.name}
+                            </span>
+                            {isAdmin && (
+                              <button onClick={() => removeIadeAssignment(iade.scheduleId)} className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100">
+                                <X className="w-3 h-3 text-red-500" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        {isAdmin && (
+                          <select
+                            className="w-full text-xs p-1 border rounded"
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                assignIade(d, shift, parseInt(e.target.value));
+                                e.target.value = '';
+                              }
+                            }}
+                          >
+                            <option value="">+ Ajouter</option>
+                            {iades.filter(iade => iade.actif && !assigned.some(a => a.id === iade.id)).map(iade => (
+                              <option key={iade.id} value={iade.id}>{iade.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* LISTE IADES */}
+      {currentView === 'iades-list' && (
+        <div className="p-8">
+          {/* TITULAIRES */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#059669' }}>
+                  <Users className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold" style={{ color: theme.gray[800] }}>IADES Titulaires</h3>
+                  <p className="text-sm" style={{ color: theme.gray[500] }}>Équipe permanente</p>
+                </div>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => setEditingIade({ is_titulaire: true, actif: true })}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-xl"
+                  style={{ backgroundColor: theme.accent }}
+                >
+                  <Plus className="w-4 h-4" />
+                  Ajouter
+                </button>
+              )}
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Nom</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Téléphone</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Email</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">Actif</th>
+                  {isAdmin && <th className="px-4 py-3 text-right text-sm font-semibold">Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {iades.filter(i => i.is_titulaire).map(iade => (
+                  <tr key={iade.id} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{iade.name}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{iade.phone || '-'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{iade.email || '-'}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-1 rounded text-xs ${iade.actif ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {iade.actif ? 'Oui' : 'Non'}
+                      </span>
+                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => setEditingIade(iade)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
+                          <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
+                        </button>
+                        <button onClick={() => { if(confirm('Supprimer cet IADE ?')) deleteIade(iade.id); }} className="p-1.5 rounded hover:bg-red-100">
+                          <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {iades.filter(i => i.is_titulaire).length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucun IADE titulaire</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* REMPLAÇANTS IADES */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.gray[500] }}>
+                  <UserPlus className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold" style={{ color: theme.gray[800] }}>IADES Remplaçants</h3>
+                  <p className="text-sm" style={{ color: theme.gray[500] }}>Personnel de remplacement</p>
+                </div>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => setEditingIade({ is_titulaire: false, actif: true })}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-xl"
+                  style={{ backgroundColor: theme.gray[600] }}
+                >
+                  <Plus className="w-4 h-4" />
+                  Ajouter
+                </button>
+              )}
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Nom</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Téléphone</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Email</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">Actif</th>
+                  {isAdmin && <th className="px-4 py-3 text-right text-sm font-semibold">Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {iades.filter(i => !i.is_titulaire).map(iade => (
+                  <tr key={iade.id} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{iade.name}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{iade.phone || '-'}</td>
+                    <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{iade.email || '-'}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-1 rounded text-xs ${iade.actif ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {iade.actif ? 'Oui' : 'Non'}
+                      </span>
+                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => setEditingIade(iade)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
+                          <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
+                        </button>
+                        <button onClick={() => { if(confirm('Supprimer cet IADE ?')) deleteIade(iade.id); }} className="p-1.5 rounded hover:bg-red-100">
+                          <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {iades.filter(i => !i.is_titulaire).length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucun IADE remplaçant</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* STATS IADES */}
+      {currentView === 'iades-stats' && (
+        <div className="p-8">
+          {/* Filtres de période */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-6">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-sm font-medium" style={{ color: theme.gray[600] }}>Période :</span>
+              <input
+                type="date"
+                value={iadesStatsPeriod.start}
+                onChange={(e) => setIadesStatsPeriod(p => ({ ...p, start: e.target.value }))}
+                className="px-3 py-1.5 border rounded-lg text-sm"
+                style={{ borderColor: theme.gray[300] }}
+              />
+              <span style={{ color: theme.gray[400] }}>→</span>
+              <input
+                type="date"
+                value={iadesStatsPeriod.end}
+                onChange={(e) => setIadesStatsPeriod(p => ({ ...p, end: e.target.value }))}
+                className="px-3 py-1.5 border rounded-lg text-sm"
+                style={{ borderColor: theme.gray[300] }}
+              />
+              {(iadesStatsPeriod.start || iadesStatsPeriod.end) && (
+                <button
+                  onClick={() => setIadesStatsPeriod({ start: '', end: '' })}
+                  className="text-xs px-3 py-1.5 rounded-lg"
+                  style={{ backgroundColor: theme.gray[100], color: theme.gray[600] }}
+                >
+                  Réinitialiser
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Tableau stats */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#059669' }}>
+                <BarChart3 className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold" style={{ color: theme.gray[800] }}>Statistiques IADES</h3>
+                <p className="text-sm" style={{ color: theme.gray[500] }}>Récapitulatif des journées travaillées</p>
+              </div>
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Nom</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">Type</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">Jours travaillés</th>
+                  <th className="px-4 py-3 text-center text-sm font-semibold">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calculateIadesStats(iadesStatsPeriod.start || null, iadesStatsPeriod.end || null).map(stat => (
+                  <tr key={stat.id} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{stat.name}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-1 rounded text-xs ${stat.is_titulaire ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {stat.is_titulaire ? 'Titulaire' : 'Remplaçant'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center text-lg font-bold">{stat.total}</td>
+                    <td className="px-4 py-3 text-center">
+                      {/* Alerte si dépassement (à configurer) */}
+                      <span className={`px-2 py-1 rounded text-xs ${stat.total > 20 ? 'bg-red-100 text-red-700' : stat.total > 15 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+                        {stat.total > 20 ? '⚠️ Alerte' : stat.total > 15 ? '⚡ Attention' : '✅ OK'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {iades.length === 0 && (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucun IADE enregistré</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITION IADE */}
+      {editingIade && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">{editingIade.id ? 'Modifier IADE' : 'Nouvel IADE'}</h2>
+              <button onClick={() => setEditingIade(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.target;
+              const data = {
+                name: form.name.value,
+                phone: form.phone.value,
+                email: form.email.value,
+                is_titulaire: form.is_titulaire.checked,
+                actif: form.actif.checked
+              };
+              if (editingIade.id) {
+                await updateIade(editingIade.id, data);
+              } else {
+                await addIade(data);
+              }
+              setEditingIade(null);
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Nom complet</label>
+                <input name="name" defaultValue={editingIade.name || ''} required className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Téléphone</label>
+                <input name="phone" defaultValue={editingIade.phone || ''} className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input name="email" type="email" defaultValue={editingIade.email || ''} className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div className="flex gap-6">
+                <label className="flex items-center gap-2">
+                  <input name="is_titulaire" type="checkbox" defaultChecked={editingIade.is_titulaire} />
+                  <span className="text-sm">Titulaire</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input name="actif" type="checkbox" defaultChecked={editingIade.actif !== false} />
+                  <span className="text-sm">Actif</span>
+                </label>
+              </div>
+              <button type="submit" className="w-full py-2 text-white rounded-xl font-medium" style={{ backgroundColor: theme.accent }}>
+                {editingIade.id ? 'Enregistrer' : 'Créer'}
+              </button>
+            </form>
           </div>
         </div>
       )}
