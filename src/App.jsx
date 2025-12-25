@@ -2871,13 +2871,33 @@ const AnesthesistScheduler = () => {
             <div>
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <h3 className="font-bold mb-4">Lien calendrier ICS</h3>
-                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Ajoutez ce lien à Google Agenda, Outlook ou Apple Calendar.</p>
-                <div className="flex gap-2">
-                  <input type="text" readOnly value={`${window.location.origin}/api/calendar/${currentUser?.ics_token}.ics`} className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50" />
-                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/calendar/${currentUser?.ics_token}.ics`); alert('Lien copié !'); }} className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50">
+                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Ajoutez ce lien à Google Agenda, Outlook ou Apple Calendar pour synchroniser automatiquement vos créneaux.</p>
+                <div className="flex gap-2 flex-wrap">
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/calendar/${currentUser?.ics_token}.ics`} 
+                    className="flex-1 min-w-[300px] px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50" 
+                  />
+                  <button 
+                    onClick={() => { 
+                      navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/calendar/${currentUser?.ics_token}.ics`); 
+                      alert('Lien copié !'); 
+                    }} 
+                    className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
+                  >
                     <Copy className="w-4 h-4" /> Copier
                   </button>
+                  <button 
+                    onClick={() => window.open(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/calendar/${currentUser?.ics_token}.ics`, '_blank')} 
+                    className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
+                  >
+                    <ExternalLink className="w-4 h-4" /> Tester
+                  </button>
                 </div>
+                <p className="text-xs mt-3" style={{ color: theme.gray[400] }}>
+                  💡 Google Agenda actualise les calendriers externes toutes les 12-24h. Les modifications ne sont pas instantanées.
+                </p>
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
