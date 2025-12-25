@@ -489,11 +489,37 @@ const AnesthesistScheduler = () => {
   const [showETPModal, setShowETPModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Rôles: 'admin', 'user', 'viewer' (direction), 'iade'
+  // ============================================
+  // RÔLES ET PERMISSIONS
+  // ============================================
+  // Rôles table anesthesists:
+  // - admin: accès total (planning anesth, génération auto, gestion utilisateurs)
+  // - user: anesthésiste (échanges, indispo, consultation)
+  // - viewer: lecteur (consultation planning + listes uniquement)
+  // 
+  // Champ is_iade_admin (boolean) dans anesthesists:
+  // - Si true, l'anesthésiste peut aussi gérer le planning IADE et les accès IADE
+  //
+  // Rôles table iades:
+  // - iade: IADE (consultation planning anesth + IADE + listes)
+  
   const isAdmin = currentUser?.role === 'admin';
   const isViewer = currentUser?.role === 'viewer';
   const isIade = currentUser?.role === 'iade';
-  const canEdit = isAdmin; // Seul l'admin peut modifier
+  const isAnesthesiste = currentUser?.role === 'user';
+  const isIadeAdmin = currentUser?.is_iade_admin === true;
+  
+  // Permissions dérivées
+  const canEditPlanning = isAdmin; // Seul l'admin peut modifier le planning anesthésiste
+  const canEditIadePlanning = isAdmin || isIadeAdmin; // Admin ou Admin IADE peut modifier le planning IADE
+  const canManageAnesthesists = isAdmin; // Seul l'admin peut gérer les anesthésistes
+  const canManageIades = isAdmin || isIadeAdmin; // Admin ou Admin IADE peut gérer les IADEs
+  const canGeneratePlanning = isAdmin; // Seul l'admin peut générer le planning auto
+  const canRequestSwap = isAdmin || isAnesthesiste; // Admin et anesthésistes peuvent demander des échanges
+  const canSetUnavailability = isAdmin || isAnesthesiste; // Admin et anesthésistes peuvent saisir des indispos
+  const canViewPlanning = true; // Tout le monde peut voir les plannings
+  const canViewContacts = true; // Tout le monde peut voir les coordonnées
+  
   const unreadCount = notifications.filter(n => !n.read).length;
 
   // ============================================
@@ -711,7 +737,7 @@ const AnesthesistScheduler = () => {
   // Priorité 3: Équilibrer WE puis fériés
   // ============================================
   const generateSchedule = async (mode = 'new', rangeStart = null, rangeEnd = null) => {
-    if (!isAdmin || isGenerating) return;
+    if (!canEditPlanning || isGenerating) return;
     setIsGenerating(true);
     setShowGenerateModal(false);
 
@@ -1024,7 +1050,7 @@ const AnesthesistScheduler = () => {
   };
 
   const updateETP = async (anesthesistId, newETP) => {
-    if (!isAdmin) return;
+    if (!canEditPlanning) return;
     await supabase.from('anesthesists').update({ etp: newETP }).eq('id', anesthesistId);
     await loadData();
   };
@@ -1073,7 +1099,7 @@ const AnesthesistScheduler = () => {
   // GESTION DES REMPLAÇANTS
   // ============================================
   const saveRemplacant = async (remplacant) => {
-    if (!isAdmin) return;
+    if (!canEditPlanning) return;
     
     if (remplacant.id) {
       await supabase.from('remplacants').update({
@@ -1099,7 +1125,7 @@ const AnesthesistScheduler = () => {
   };
 
   const deleteRemplacant = async (id) => {
-    if (!isAdmin) return;
+    if (!canEditPlanning) return;
     if (!window.confirm('Supprimer ce remplaçant ?')) return;
     
     await supabase.from('remplacants').update({ actif: false }).eq('id', id);
@@ -1110,7 +1136,7 @@ const AnesthesistScheduler = () => {
   // GESTION DES ANESTHÉSISTES (ADMIN)
   // ============================================
   const saveAnesthesist = async (anesth) => {
-    if (!isAdmin) return;
+    if (!canManageAnesthesists) return;
     
     if (anesth.id) {
       await supabase.from('anesthesists').update({
@@ -1118,7 +1144,8 @@ const AnesthesistScheduler = () => {
         email: anesth.email,
         phone: anesth.phone,
         role: anesth.role,
-        etp: anesth.etp
+        etp: anesth.etp,
+        is_iade_admin: anesth.is_iade_admin || false
       }).eq('id', anesth.id);
     } else {
       await supabase.from('anesthesists').insert({
@@ -1126,7 +1153,8 @@ const AnesthesistScheduler = () => {
         email: anesth.email,
         phone: anesth.phone,
         role: anesth.role || 'user',
-        etp: anesth.etp || 0.5
+        etp: anesth.etp || 0.5,
+        is_iade_admin: anesth.is_iade_admin || false
       });
     }
     
@@ -1135,7 +1163,7 @@ const AnesthesistScheduler = () => {
   };
 
   const deleteAnesthesist = async (id) => {
-    if (!isAdmin) return;
+    if (!canManageAnesthesists) return;
     if (!window.confirm('Supprimer ce médecin ? (Les données de planning seront conservées)')) return;
     
     await supabase.from('anesthesists').delete().eq('id', id);
@@ -1146,7 +1174,7 @@ const AnesthesistScheduler = () => {
   // GESTION DES REMPLACEMENTS
   // ============================================
   const addRemplacement = async (date, shift, remplacantId, titulaireId) => {
-    if (!isAdmin) return;
+    if (!canEditPlanning) return;
     
     const remplacant = remplacants.find(r => r.id === remplacantId);
     if (!remplacant) return;
@@ -1201,7 +1229,7 @@ const AnesthesistScheduler = () => {
   };
 
   const deleteRemplacement = async (id) => {
-    if (!isAdmin) return;
+    if (!canEditPlanning) return;
     await supabase.from('remplacements').delete().eq('id', id);
     await loadData();
   };
@@ -1210,28 +1238,28 @@ const AnesthesistScheduler = () => {
   // FONCTIONS IADES
   // ============================================
   const addIade = async (iadeData) => {
-    if (!isAdmin) return;
+    if (!canManageIades) return;
     const { error } = await supabase.from('iades').insert(iadeData);
     if (!error) await loadData();
     return error;
   };
 
   const updateIade = async (id, iadeData) => {
-    if (!isAdmin) return;
+    if (!canManageIades) return;
     const { error } = await supabase.from('iades').update(iadeData).eq('id', id);
     if (!error) await loadData();
     return error;
   };
 
   const deleteIade = async (id) => {
-    if (!isAdmin) return;
+    if (!canManageIades) return;
     await supabase.from('schedule_iades').delete().eq('iade_id', id);
     await supabase.from('iades').delete().eq('id', id);
     await loadData();
   };
 
   const assignIade = async (date, shift, iadeId, isRemplacant = false, remplacantName = null) => {
-    if (!isAdmin) return;
+    if (!canEditIadePlanning) return;
     const dateKey = formatDateKey(date);
     const year = new Date(date).getFullYear();
     
@@ -1249,7 +1277,7 @@ const AnesthesistScheduler = () => {
   };
 
   const removeIadeAssignment = async (scheduleId) => {
-    if (!isAdmin) return;
+    if (!canEditIadePlanning) return;
     await supabase.from('schedule_iades').delete().eq('id', scheduleId);
     await loadData();
   };
@@ -1717,15 +1745,15 @@ const AnesthesistScheduler = () => {
 
         <nav className="flex-1 p-4">
           {[
-            { id: 'dashboard', icon: Home, label: 'Tableau de bord', show: !isViewer && !isIade },
-            { id: 'planning', icon: Calendar, label: 'Planning', show: true },
-            { id: 'stats', icon: BarChart3, label: 'Statistiques', show: !isIade },
-            { id: 'incoherences', icon: AlertTriangle, label: 'Incohérences', show: !isIade && !isViewer, badge: incoherenceCount },
-            { id: 'remplacants', icon: UserPlus, label: 'Remplaçants', show: !isIade },
-            { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges', show: !isViewer && !isIade },
-            { id: 'unavailabilities', icon: CalendarOff, label: 'Indisponibilités', show: !isViewer && !isIade },
-            { id: 'admin', icon: Shield, label: 'Administration', show: isAdmin },
-            { id: 'settings', icon: Settings, label: 'Paramètres', show: !isViewer && !isIade },
+            { id: 'dashboard', icon: Home, label: 'Tableau de bord', show: canRequestSwap }, // Admin et anesthésistes
+            { id: 'planning', icon: Calendar, label: 'Planning', show: true }, // Tout le monde
+            { id: 'stats', icon: BarChart3, label: 'Statistiques', show: !isIade }, // Pas les IADEs
+            { id: 'incoherences', icon: AlertTriangle, label: 'Incohérences', show: canEditPlanning, badge: incoherenceCount }, // Admin seulement
+            { id: 'remplacants', icon: UserPlus, label: 'Remplaçants', show: !isIade && !isViewer }, // Admin et anesthésistes
+            { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges', show: canRequestSwap }, // Admin et anesthésistes
+            { id: 'unavailabilities', icon: CalendarOff, label: 'Indisponibilités', show: canSetUnavailability }, // Admin et anesthésistes
+            { id: 'admin', icon: Shield, label: 'Administration', show: canManageAnesthesists || canManageIades }, // Admin ou Admin IADE
+            { id: 'settings', icon: Settings, label: 'Paramètres', show: canRequestSwap }, // Admin et anesthésistes
           ].filter(item => item.show).map(item => (
             <button
               key={item.id}
@@ -1766,27 +1794,27 @@ const AnesthesistScheduler = () => {
                   <Calendar className="w-4 h-4" />
                   <span>Planning</span>
                 </button>
-                {!isIade && (
-                  <button
-                    onClick={() => setCurrentView('iades-list')}
-                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
-                      currentView === 'iades-list' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
-                    }`}
-                  >
-                    <Users className="w-4 h-4" />
-                    <span>Équipe</span>
-                  </button>
-                )}
                 <button
-                  onClick={() => setCurrentView('iades-heures')}
+                  onClick={() => setCurrentView('iades-list')}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
-                    currentView === 'iades-heures' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                    currentView === 'iades-list' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
                 >
-                  <Clock className="w-4 h-4" />
-                  <span>Saisie heures</span>
+                  <Users className="w-4 h-4" />
+                  <span>Équipe</span>
                 </button>
-                {!isIade && (
+                {canManageIades && (
+                  <button
+                    onClick={() => setCurrentView('iades-heures')}
+                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
+                      currentView === 'iades-heures' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Saisie heures</span>
+                  </button>
+                )}
+                {canManageIades && (
                   <button
                     onClick={() => setCurrentView('iades-stats')}
                     className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
@@ -1929,7 +1957,7 @@ const AnesthesistScheduler = () => {
                     <button onClick={() => setShowStats(!showStats)} className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium flex items-center gap-2">
                       <TrendingUp className="w-4 h-4" /> Stats
                     </button>
-                    {isAdmin && (
+                    {canEditPlanning && (
                       <>
                         <button 
                           onClick={() => setShowETPModal(true)} 
@@ -2493,7 +2521,7 @@ const AnesthesistScheduler = () => {
                               {getShiftLabel(r.shift)}
                             </span>
                           </div>
-                          {isAdmin && (
+                          {canEditPlanning && (
                             <button onClick={() => deleteRemplacement(r.id)} className="p-1 rounded hover:bg-red-100" style={{ color: theme.danger }}>
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -2579,7 +2607,7 @@ const AnesthesistScheduler = () => {
             <div>
               <div className="flex justify-between mb-6">
                 <p style={{ color: theme.gray[500] }}>Liste des médecins remplaçants de la clinique</p>
-                {isAdmin && (
+                {canEditPlanning && (
                   <button 
                     onClick={() => setEditingRemplacant({ name: '', email: '', phone: '', specialite: '', notes: '' })}
                     className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
@@ -2620,7 +2648,7 @@ const AnesthesistScheduler = () => {
                             <p className="text-sm mt-2 italic" style={{ color: theme.gray[500] }}>{r.notes}</p>
                           )}
                         </div>
-                        {isAdmin && (
+                        {canEditPlanning && (
                           <div className="flex gap-2">
                             <button
                               onClick={() => setEditingRemplacant(r)}
@@ -2738,80 +2766,90 @@ const AnesthesistScheduler = () => {
           )}
 
           {/* ADMIN */}
-          {currentView === 'admin' && isAdmin && (
+          {currentView === 'admin' && (canManageAnesthesists || canManageIades) && (
             <div>
-              {/* Gestion des médecins */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold">Gestion des médecins</h3>
-                  <button 
-                    onClick={() => setEditingAnesth({ name: '', email: '', phone: '', role: 'user', etp: 0.5 })}
-                    className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
-                    style={{ backgroundColor: theme.primary }}
-                  >
-                    <UserPlus className="w-4 h-4" /> Ajouter
-                  </button>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Rôle</th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>ETP</th>
-                        <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {anesthesists.map(a => (
-                        <tr key={a.id} className="border-b hover:bg-gray-50">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: a.color }} />
-                              {a.name}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{a.email}</td>
-                          <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{a.phone || '-'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded text-xs ${
-                              a.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                              a.role === 'viewer' ? 'bg-gray-100 text-gray-700' :
-                              'bg-blue-100 text-blue-700'
-                            }`}>
-                              {a.role === 'admin' ? 'Admin' : a.role === 'viewer' ? 'Consultation' : 'Utilisateur'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm">{a.role !== 'viewer' ? `${Math.round((a.etp || 0.5) * 100)}%` : '-'}</td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => setEditingAnesth(a)}
-                                className="p-2 rounded-xl hover:bg-blue-50"
-                                style={{ color: theme.accent }}
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              {a.id !== currentUser?.id && (
-                                <button
-                                  onClick={() => deleteAnesthesist(a.id)}
-                                  className="p-2 rounded-xl hover:bg-red-50"
-                                  style={{ color: theme.danger }}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
+              {/* Gestion des médecins - Visible uniquement pour Admin global */}
+              {canManageAnesthesists && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold">Gestion des médecins</h3>
+                    <button 
+                      onClick={() => setEditingAnesth({ name: '', email: '', phone: '', role: 'user', etp: 0.5, is_iade_admin: false })}
+                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                      style={{ backgroundColor: theme.primary }}
+                    >
+                      <UserPlus className="w-4 h-4" /> Ajouter
+                    </button>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Rôle</th>
+                          <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Admin IADE</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>ETP</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {anesthesists.map(a => (
+                          <tr key={a.id} className="border-b hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: a.color }} />
+                                {a.name}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{a.email}</td>
+                            <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{a.phone || '-'}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded text-xs ${
+                                a.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                                a.role === 'viewer' ? 'bg-gray-100 text-gray-700' :
+                                'bg-blue-100 text-blue-700'
+                              }`}>
+                                {a.role === 'admin' ? 'Admin' : a.role === 'viewer' ? 'Consultation' : 'Utilisateur'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {a.role !== 'viewer' && (
+                                <span className={`px-2 py-1 rounded text-xs ${a.is_iade_admin ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                  {a.is_iade_admin ? '✓ Oui' : 'Non'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm">{a.role !== 'viewer' ? `${Math.round((a.etp || 0.5) * 100)}%` : '-'}</td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => setEditingAnesth(a)}
+                                  className="p-2 rounded-xl hover:bg-blue-50"
+                                  style={{ color: theme.accent }}
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                {a.id !== currentUser?.id && (
+                                  <button
+                                    onClick={() => deleteAnesthesist(a.id)}
+                                    className="p-2 rounded-xl hover:bg-red-50"
+                                    style={{ color: theme.danger }}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Comptes consultation */}
               <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-6">
@@ -2837,20 +2875,93 @@ const AnesthesistScheduler = () => {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
-                <h3 className="font-bold mb-4">Transférer le rôle admin</h3>
-                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Attention : cette action est irréversible.</p>
-                <select 
-                  className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-xl" 
-                  onChange={(e) => e.target.value && transferAdmin(parseInt(e.target.value))}
-                  defaultValue=""
-                >
-                  <option value="">Choisir un anesthésiste...</option>
-                  {anesthesists.filter(a => a.id !== currentUser?.id && a.role !== 'viewer').map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
+              {canManageAnesthesists && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                  <h3 className="font-bold mb-4">Transférer le rôle admin</h3>
+                  <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Attention : cette action est irréversible.</p>
+                  <select 
+                    className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-xl" 
+                    onChange={(e) => e.target.value && transferAdmin(parseInt(e.target.value))}
+                    defaultValue=""
+                  >
+                    <option value="">Choisir un anesthésiste...</option>
+                    {anesthesists.filter(a => a.id !== currentUser?.id && a.role !== 'viewer').map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Section gestion des IADEs - Visible pour Admin global et Admin IADE */}
+              {canManageIades && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold">Gestion des IADEs</h3>
+                      <p className="text-sm" style={{ color: theme.gray[500] }}>Gérer l'accès des IADEs à l'outil</p>
+                    </div>
+                    <button 
+                      onClick={() => setEditingIade({ name: '', email: '', phone: '', is_titulaire: true, actif: true, role: 'iade' })}
+                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                      style={{ backgroundColor: '#059669' }}
+                    >
+                      <UserPlus className="w-4 h-4" /> Ajouter IADE
+                    </button>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
+                          <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Titulaire</th>
+                          <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Actif</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {iades.map(iade => (
+                          <tr key={iade.id} className="border-b hover:bg-gray-50">
+                            <td className="px-4 py-3 font-medium">{iade.name}</td>
+                            <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{iade.email || '-'}</td>
+                            <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{iade.phone || '-'}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-1 rounded text-xs ${iade.is_titulaire ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {iade.is_titulaire ? 'Oui' : 'Non'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-1 rounded text-xs ${iade.actif ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                                {iade.actif ? 'Actif' : 'Inactif'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => setEditingIade(iade)}
+                                  className="p-2 rounded-xl hover:bg-blue-50"
+                                  style={{ color: theme.accent }}
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => { if(confirm('Supprimer cet IADE ?')) deleteIade(iade.id); }}
+                                  className="p-2 rounded-xl hover:bg-red-50"
+                                  style={{ color: theme.danger }}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h3 className="font-bold mb-4">Jours fériés {new Date().getFullYear()} / {new Date().getFullYear() + 1}</h3>
@@ -2871,33 +2982,13 @@ const AnesthesistScheduler = () => {
             <div>
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <h3 className="font-bold mb-4">Lien calendrier ICS</h3>
-                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Ajoutez ce lien à Google Agenda, Outlook ou Apple Calendar pour synchroniser automatiquement vos créneaux.</p>
-                <div className="flex gap-2 flex-wrap">
-                  <input 
-                    type="text" 
-                    readOnly 
-                    value={`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`} 
-                    className="flex-1 min-w-[300px] px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50" 
-                  />
-                  <button 
-                    onClick={() => { 
-                      navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`); 
-                      alert('Lien copié !'); 
-                    }} 
-                    className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
-                  >
+                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Ajoutez ce lien à Google Agenda, Outlook ou Apple Calendar.</p>
+                <div className="flex gap-2">
+                  <input type="text" readOnly value={`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`} className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50" />
+                  <button onClick={() => { navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`); alert('Lien copié !'); }} className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50">
                     <Copy className="w-4 h-4" /> Copier
                   </button>
-                  <button 
-                    onClick={() => window.open(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`, '_blank')} 
-                    className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
-                  >
-                    <ExternalLink className="w-4 h-4" /> Tester
-                  </button>
                 </div>
-                <p className="text-xs mt-3" style={{ color: theme.gray[400] }}>
-                  💡 Google Agenda actualise les calendriers externes toutes les 12-24h. Les modifications ne sont pas instantanées.
-                </p>
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -3012,14 +3103,14 @@ const AnesthesistScheduler = () => {
                                   <span className="px-3 py-1.5 rounded-lg text-sm text-white truncate flex-1 font-medium" style={{ backgroundColor: iade.color }}>
                                     {iade.isRemplacant ? '🔄 ' : ''}{iade.name}
                                   </span>
-                                  {isAdmin && (
+                                  {canEditIadePlanning && (
                                     <button onClick={() => removeIadeAssignment(iade.scheduleId)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-100">
                                       <X className="w-4 h-4 text-red-500" />
                                     </button>
                                   )}
                                 </div>
                               ))}
-                              {isAdmin && (
+                              {canEditIadePlanning && (
                                 <select
                                   className="w-full text-sm p-2 border rounded-lg mt-2"
                                   style={{ borderColor: theme.gray[300] }}
@@ -3063,7 +3154,7 @@ const AnesthesistScheduler = () => {
                       <p className="text-sm" style={{ color: theme.gray[500] }}>Équipe permanente</p>
                     </div>
                   </div>
-                  {isAdmin && (
+                  {canManageIades && (
                     <button
                       onClick={() => setEditingIade({ is_titulaire: true, actif: true })}
                       className="flex items-center gap-2 px-4 py-2 text-white rounded-xl"
@@ -3082,7 +3173,7 @@ const AnesthesistScheduler = () => {
                         <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Actif</th>
-                        {isAdmin && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
+                        {canManageIades && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -3096,7 +3187,7 @@ const AnesthesistScheduler = () => {
                               {iade.actif ? 'Oui' : 'Non'}
                             </span>
                           </td>
-                          {isAdmin && (
+                          {canManageIades && (
                             <td className="px-4 py-3 text-right">
                               <button onClick={() => setEditingIade(iade)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
                                 <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
@@ -3128,7 +3219,7 @@ const AnesthesistScheduler = () => {
                       <p className="text-sm" style={{ color: theme.gray[500] }}>Personnel de remplacement</p>
                     </div>
                   </div>
-                  {isAdmin && (
+                  {canManageIades && (
                     <button
                       onClick={() => setEditingIade({ is_titulaire: false, actif: true })}
                       className="flex items-center gap-2 px-4 py-2 text-white rounded-xl"
@@ -3147,7 +3238,7 @@ const AnesthesistScheduler = () => {
                         <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Actif</th>
-                        {isAdmin && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
+                        {canManageIades && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -3161,7 +3252,7 @@ const AnesthesistScheduler = () => {
                               {iade.actif ? 'Oui' : 'Non'}
                             </span>
                           </td>
-                          {isAdmin && (
+                          {canManageIades && (
                             <td className="px-4 py-3 text-right">
                               <button onClick={() => setEditingIade(iade)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
                                 <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
@@ -3774,6 +3865,21 @@ const AnesthesistScheduler = () => {
                     onChange={(e) => setEditingAnesth({...editingAnesth, etp: parseInt(e.target.value) / 100})}
                     className="w-full px-3 py-2 border rounded-xl"
                   />
+                </div>
+              )}
+              {editingAnesth.role !== 'viewer' && (
+                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                  <input
+                    type="checkbox"
+                    id="is_iade_admin"
+                    checked={editingAnesth.is_iade_admin || false}
+                    onChange={(e) => setEditingAnesth({...editingAnesth, is_iade_admin: e.target.checked})}
+                    className="w-5 h-5 rounded"
+                  />
+                  <label htmlFor="is_iade_admin" className="cursor-pointer">
+                    <div className="font-medium text-sm">Admin IADE</div>
+                    <div className="text-xs" style={{ color: theme.gray[500] }}>Peut gérer le planning et les accès des IADEs</div>
+                  </label>
                 </div>
               )}
             </div>
