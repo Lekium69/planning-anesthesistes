@@ -1029,7 +1029,7 @@ const AnesthesistScheduler = () => {
   // ACTIONS
   // ============================================
   const toggleAssignment = async (date, anesthesistId, shift) => {
-    if (!canEdit) return;
+    if (!canEditPlanning) return;
     const dateKey = formatDateKey(date);
     const entries = schedule[dateKey]?.[shift] || [];
     const exists = entries.some(e => e.type === 'titulaire' && e.id === anesthesistId);
@@ -1044,7 +1044,7 @@ const AnesthesistScheduler = () => {
   
   // Supprimer un remplaçant du planning
   const removeRemplacant = async (scheduleId) => {
-    if (!canEdit) return;
+    if (!canEditPlanning) return;
     await supabase.from('schedule').delete().eq('id', scheduleId);
     await loadData();
   };
@@ -2071,14 +2071,14 @@ const AnesthesistScheduler = () => {
                                 <div 
                                   key={a.id} 
                                   onClick={() => {
-                                    if (!canEdit) return;
+                                    if (!canEditPlanning) return;
                                     if (a.isRemplacant) {
                                       removeRemplacant(a.scheduleId);
                                     } else {
                                       toggleAssignment(d, a.id, shift);
                                     }
                                   }} 
-                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : ''} ${!a.isRemplacant && a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
+                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEditPlanning ? 'cursor-pointer hover:opacity-80' : ''} ${!a.isRemplacant && a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
                                   style={{ backgroundColor: a.color }}
                                   title={a.isRemplacant && a.titulaireRemplace ? `${a.name} remplace ${a.titulaireRemplace}` : a.name}
                                 >
@@ -2094,7 +2094,7 @@ const AnesthesistScheduler = () => {
                                   )}
                                 </div>
                               ))}
-                              {canEdit && (
+                              {canEditPlanning && (
                                 <select 
                                   className="w-full text-xs p-1.5 border rounded-lg mt-1" 
                                   value="" 
