@@ -2796,7 +2796,7 @@ const AnesthesistScheduler = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {anesthesists.map(a => (
+                        {anesthesists.filter(a => a.role !== 'viewer').map(a => (
                           <tr key={a.id} className="border-b hover:bg-gray-50">
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
@@ -2809,20 +2809,17 @@ const AnesthesistScheduler = () => {
                             <td className="px-4 py-3">
                               <span className={`px-2 py-1 rounded text-xs ${
                                 a.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                                a.role === 'viewer' ? 'bg-gray-100 text-gray-700' :
                                 'bg-blue-100 text-blue-700'
                               }`}>
-                                {a.role === 'admin' ? 'Admin' : a.role === 'viewer' ? 'Consultation' : 'Utilisateur'}
+                                {a.role === 'admin' ? 'Admin' : 'Utilisateur'}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              {a.role !== 'viewer' && (
-                                <span className={`px-2 py-1 rounded text-xs ${a.is_iade_admin ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                  {a.is_iade_admin ? '✓ Oui' : 'Non'}
-                                </span>
-                              )}
+                              <span className={`px-2 py-1 rounded text-xs ${a.is_iade_admin ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {a.is_iade_admin ? '✓ Oui' : 'Non'}
+                              </span>
                             </td>
-                            <td className="px-4 py-3 text-sm">{a.role !== 'viewer' ? `${Math.round((a.etp || 0.5) * 100)}%` : '-'}</td>
+                            <td className="px-4 py-3 text-sm">{`${Math.round((a.etp || 0.5) * 100)}%`}</td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end gap-2">
                                 <button
@@ -2851,29 +2848,74 @@ const AnesthesistScheduler = () => {
                 </div>
               )}
 
-              {/* Comptes consultation */}
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-6">
-                <h3 className="font-bold mb-2" style={{ color: theme.gray[800] }}>💡 Comptes en consultation seule</h3>
-                <p className="text-sm mb-4" style={{ color: theme.gray[600] }}>
-                  Ces comptes peuvent uniquement consulter le planning, sans possibilité de modification.
-                </p>
-                <div className="space-y-2">
-                  {anesthesists.filter(a => a.role === 'viewer').map(a => (
-                    <div key={a.id} className="flex items-center justify-between bg-white rounded-xl p-3">
-                      <div>
-                        <div className="font-medium">{a.name}</div>
-                        <div className="text-sm" style={{ color: theme.gray[500] }}>{a.email}</div>
-                      </div>
-                      <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs">viewer</span>
+              {/* Comptes consultation seule */}
+              {canManageAnesthesists && (
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold" style={{ color: theme.gray[800] }}>👁️ Comptes en consultation seule</h3>
+                      <p className="text-sm" style={{ color: theme.gray[600] }}>
+                        Ces comptes peuvent uniquement consulter le planning, sans possibilité de modification.
+                      </p>
                     </div>
-                  ))}
-                  {anesthesists.filter(a => a.role === 'viewer').length === 0 && (
-                    <p className="text-sm italic" style={{ color: theme.gray[500] }}>
-                      Aucun compte viewer. Ajoutez-en un avec le rôle "Consultation".
-                    </p>
+                    <button 
+                      onClick={() => setEditingAnesth({ name: '', email: '', phone: '', role: 'viewer', etp: 0 })}
+                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                      style={{ backgroundColor: theme.gray[600] }}
+                    >
+                      <UserPlus className="w-4 h-4" /> Ajouter
+                    </button>
+                  </div>
+                  
+                  {anesthesists.filter(a => a.role === 'viewer').length > 0 ? (
+                    <div className="overflow-x-auto bg-white rounded-xl">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                            <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {anesthesists.filter(a => a.role === 'viewer').map(a => (
+                            <tr key={a.id} className="border-b hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium">{a.name}</td>
+                              <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{a.email}</td>
+                              <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{a.phone || '-'}</td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => setEditingAnesth(a)}
+                                    className="p-2 rounded-xl hover:bg-blue-50"
+                                    style={{ color: theme.accent }}
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => deleteAnesthesist(a.id)}
+                                    className="p-2 rounded-xl hover:bg-red-50"
+                                    style={{ color: theme.danger }}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-xl p-4 text-center">
+                      <p className="text-sm italic" style={{ color: theme.gray[500] }}>
+                        Aucun compte en consultation. Cliquez sur "Ajouter" pour en créer un.
+                      </p>
+                    </div>
                   )}
                 </div>
-              </div>
+              )}
 
               {canManageAnesthesists && (
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
