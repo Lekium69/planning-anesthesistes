@@ -2876,12 +2876,12 @@ const AnesthesistScheduler = () => {
                   <input 
                     type="text" 
                     readOnly 
-                    value={`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/calendar/${currentUser?.ics_token}.ics`} 
+                    value={`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`} 
                     className="flex-1 min-w-[300px] px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50" 
                   />
                   <button 
                     onClick={() => { 
-                      navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/calendar/${currentUser?.ics_token}.ics`); 
+                      navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`); 
                       alert('Lien copié !'); 
                     }} 
                     className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
@@ -2889,7 +2889,7 @@ const AnesthesistScheduler = () => {
                     <Copy className="w-4 h-4" /> Copier
                   </button>
                   <button 
-                    onClick={() => window.open(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/calendar/${currentUser?.ics_token}.ics`, '_blank')} 
+                    onClick={() => window.open(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`, '_blank')} 
                     className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
                   >
                     <ExternalLink className="w-4 h-4" /> Tester
