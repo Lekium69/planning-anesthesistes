@@ -488,6 +488,10 @@ const AnesthesistScheduler = () => {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showETPModal, setShowETPModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   // ============================================
   // RÔLES ET PERMISSIONS
@@ -530,9 +534,20 @@ const AnesthesistScheduler = () => {
       setUser(session?.user ?? null);
       setAuthLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      // Détecter si l'utilisateur arrive via un lien de récupération de mot de passe
+      if (event === 'PASSWORD_RECOVERY') {
+        setShowPasswordReset(true);
+      }
     });
+    
+    // Vérifier aussi l'URL pour le token de recovery
+    const hash = window.location.hash;
+    if (hash && hash.includes('type=recovery')) {
+      setShowPasswordReset(true);
+    }
+    
     return () => subscription.unsubscribe();
   }, []);
 
@@ -1160,6 +1175,34 @@ const AnesthesistScheduler = () => {
     
     setEditingAnesth(null);
     await loadData();
+  };
+
+  // Fonction pour changer le mot de passe
+  const updatePassword = async () => {
+    setPasswordError('');
+    
+    if (newPassword.length < 6) {
+      setPasswordError('Le mot de passe doit contenir au moins 6 caractères');
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Les mots de passe ne correspondent pas');
+      return;
+    }
+    
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    
+    if (error) {
+      setPasswordError(error.message);
+    } else {
+      alert('Mot de passe mis à jour avec succès !');
+      setShowPasswordReset(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      // Nettoyer l'URL
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   };
 
   const deleteAnesthesist = async (id) => {
@@ -3052,6 +3095,19 @@ const AnesthesistScheduler = () => {
                   </label>
                 ))}
               </div>
+
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
+                <h3 className="font-bold mb-4">🔐 Sécurité</h3>
+                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
+                  Modifiez votre mot de passe de connexion.
+                </p>
+                <button
+                  onClick={() => setShowPasswordReset(true)}
+                  className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50"
+                >
+                  Changer mon mot de passe
+                </button>
+              </div>
             </div>
           )}
 
@@ -3976,6 +4032,69 @@ const AnesthesistScheduler = () => {
                 className="w-full px-4 py-2 border rounded-xl hover:bg-gray-50"
               >
                 Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CHANGEMENT MOT DE PASSE */}
+      {showPasswordReset && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-bold">🔐 Définir un nouveau mot de passe</h2>
+              <p className="text-sm mt-1" style={{ color: theme.gray[500] }}>
+                Veuillez entrer votre nouveau mot de passe
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Nouveau mot de passe</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl"
+                  placeholder="Au moins 6 caractères"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Confirmer le mot de passe</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl"
+                  placeholder="Répétez le mot de passe"
+                />
+              </div>
+              {passwordError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+                  {passwordError}
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowPasswordReset(false);
+                  setNewPassword('');
+                  setConfirmPassword('');
+                  setPasswordError('');
+                  window.history.replaceState(null, '', window.location.pathname);
+                }}
+                className="px-4 py-2 border rounded-xl hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={updatePassword}
+                disabled={!newPassword || !confirmPassword}
+                className="px-4 py-2 text-white rounded-xl disabled:opacity-50"
+                style={{ backgroundColor: theme.primary }}
+              >
+                Enregistrer
               </button>
             </div>
           </div>
