@@ -167,46 +167,121 @@ const getHolidaysForYear = (year) => {
 const LoginPage = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [forgotMode, setForgotMode] = useState(false);
+  const [mode, setMode] = useState('login'); // 'login', 'firstTime', 'forgot'
   const [resetSent, setResetSent] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // Vérifier si l'email existe dans la base (anesthesists ou iades)
+  const verifyEmail = async () => {
     setLoading(true);
     setError('');
+    
     try {
-      if (forgotMode) {
-        const { data: userData } = await supabase
-          .from('anesthesists')
-          .select('email')
-          .eq('email', email.toLowerCase())
-          .single();
-        
-        if (!userData) {
-          setError('Aucun compte associé à cet email');
-          setLoading(false);
-          return;
-        }
-        setResetSent(true);
+      // Vérifier dans anesthesists
+      const { data: anesthData } = await supabase
+        .from('anesthesists')
+        .select('email')
+        .eq('email', email.toLowerCase().trim())
+        .single();
+      
+      if (anesthData) {
+        setEmailVerified(true);
         setLoading(false);
         return;
       }
       
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setMessage('Compte créé ! Vous pouvez maintenant vous connecter.');
-        setIsSignUp(false);
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        onLogin(data.user);
+      // Vérifier dans iades
+      const { data: iadeData } = await supabase
+        .from('iades')
+        .select('email')
+        .eq('email', email.toLowerCase().trim())
+        .single();
+      
+      if (iadeData) {
+        setEmailVerified(true);
+        setLoading(false);
+        return;
       }
+      
+      setError("Cet email n'est pas autorisé. Contactez l'administrateur pour être ajouté.");
+    } catch (err) {
+      setError("Cet email n'est pas autorisé. Contactez l'administrateur pour être ajouté.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Créer le compte pour première connexion
+  const handleFirstTimeSignUp = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    if (password.length < 6) {
+      setError('Le mot de passe doit contenir au moins 6 caractères');
+      setLoading(false);
+      return;
+    }
+    
+    if (password !== confirmPassword) {
+      setError('Les mots de passe ne correspondent pas');
+      setLoading(false);
+      return;
+    }
+    
+    try {
+      // Créer le compte dans Supabase Auth
+      const { data, error } = await supabase.auth.signUp({ 
+        email: email.toLowerCase().trim(), 
+        password 
+      });
+      
+      if (error) throw error;
+      
+      // Connexion automatique après création
+      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ 
+        email: email.toLowerCase().trim(), 
+        password 
+      });
+      
+      if (loginError) {
+        setMessage('Compte créé ! Vous pouvez maintenant vous connecter.');
+        setMode('login');
+        setEmailVerified(false);
+        setPassword('');
+        setConfirmPassword('');
+      } else {
+        onLogin(loginData.user);
+      }
+    } catch (err) {
+      if (err.message.includes('already registered')) {
+        setError('Un compte existe déjà avec cet email. Utilisez "Se connecter" ou "Mot de passe oublié".');
+      } else {
+        setError(err.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Connexion normale
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ 
+        email: email.toLowerCase().trim(), 
+        password 
+      });
+      if (error) throw error;
+      onLogin(data.user);
     } catch (err) {
       setError(err.message === 'Invalid login credentials' ? 'Email ou mot de passe incorrect' : err.message);
     } finally {
@@ -214,6 +289,48 @@ const LoginPage = ({ onLogin }) => {
     }
   };
 
+  // Mot de passe oublié
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    try {
+      // Vérifier que l'email existe
+      const { data: anesthData } = await supabase
+        .from('anesthesists')
+        .select('email')
+        .eq('email', email.toLowerCase().trim())
+        .single();
+      
+      const { data: iadeData } = await supabase
+        .from('iades')
+        .select('email')
+        .eq('email', email.toLowerCase().trim())
+        .single();
+      
+      if (!anesthData && !iadeData) {
+        setError("Aucun compte associé à cet email");
+        setLoading(false);
+        return;
+      }
+      
+      // Envoyer le lien de réinitialisation
+      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+        redirectTo: window.location.origin,
+      });
+      
+      if (error) throw error;
+      
+      setResetSent(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Écran de confirmation reset envoyé
   if (resetSent) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark} 100%)` }}>
@@ -221,12 +338,13 @@ const LoginPage = ({ onLogin }) => {
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Mail className="w-8 h-8 text-green-600" />
           </div>
-          <h2 className="text-xl font-bold mb-2" style={{ color: theme.gray[800] }}>Demande envoyée</h2>
+          <h2 className="text-xl font-bold mb-2" style={{ color: theme.gray[800] }}>Email envoyé !</h2>
           <p className="text-gray-500 mb-4">
-            Contactez l'administrateur pour réinitialiser votre mot de passe pour <strong>{email}</strong>.
+            Un lien de réinitialisation a été envoyé à <strong>{email}</strong>.<br />
+            Vérifiez votre boîte mail (et les spams).
           </p>
           <button 
-            onClick={() => { setForgotMode(false); setResetSent(false); setError(''); }}
+            onClick={() => { setMode('login'); setResetSent(false); setError(''); }}
             className="font-medium" style={{ color: theme.primary }}
           >
             ← Retour à la connexion
@@ -245,21 +363,23 @@ const LoginPage = ({ onLogin }) => {
           </div>
           <h1 className="text-2xl font-bold" style={{ color: theme.gray[800] }}>Planning Anesthésistes</h1>
           <p className="text-gray-500 mt-2">
-            {forgotMode ? 'Réinitialiser le mot de passe' : isSignUp ? 'Créer un compte' : 'Connectez-vous'}
+            {mode === 'login' && 'Connectez-vous'}
+            {mode === 'firstTime' && (emailVerified ? 'Créez votre mot de passe' : 'Première connexion')}
+            {mode === 'forgot' && 'Mot de passe oublié'}
           </p>
         </div>
         
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input 
-            type="email" 
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)} 
-            placeholder="Email" 
-            required
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-          />
-          
-          {!forgotMode && (
+        {/* MODE CONNEXION */}
+        {mode === 'login' && (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input 
+              type="email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              placeholder="Email" 
+              required
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+            />
             <div className="relative">
               <input 
                 type={showPassword ? "text" : "password"} 
@@ -278,54 +398,192 @@ const LoginPage = ({ onLogin }) => {
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
-          )}
-          
-          {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
-          {message && <div className="bg-green-50 text-green-600 px-4 py-3 rounded-xl text-sm">{message}</div>}
-          
-          <button 
-            type="submit" 
-            disabled={loading} 
-            className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
-            style={{ backgroundColor: theme.primary }}
-          >
-            {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
-              <>
-                {forgotMode ? <Mail className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
-                {forgotMode ? 'Demander la réinitialisation' : isSignUp ? "S'inscrire" : 'Se connecter'}
-              </>
-            )}
-          </button>
-        </form>
-        
-        {!forgotMode && (
-          <div className="mt-4 space-y-2 text-center">
+            
+            {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
+            {message && <div className="bg-green-50 text-green-600 px-4 py-3 rounded-xl text-sm">{message}</div>}
+            
             <button 
-              onClick={() => { setForgotMode(true); setError(''); }} 
-              className="text-sm hover:underline" 
+              type="submit" 
+              disabled={loading} 
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+              style={{ backgroundColor: theme.primary }}
+            >
+              {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
+                <>
+                  <LogIn className="w-5 h-5" />
+                  Se connecter
+                </>
+              )}
+            </button>
+            
+            <div className="mt-4 space-y-2 text-center">
+              <button 
+                type="button"
+                onClick={() => { setMode('forgot'); setError(''); setMessage(''); }} 
+                className="text-sm hover:underline" 
+                style={{ color: theme.gray[500] }}
+              >
+                Mot de passe oublié ?
+              </button>
+              <br />
+              <button 
+                type="button"
+                onClick={() => { setMode('firstTime'); setError(''); setMessage(''); setEmailVerified(false); }} 
+                className="text-sm font-medium hover:underline" 
+                style={{ color: theme.primary }}
+              >
+                🆕 Première connexion ? Créer mon compte
+              </button>
+            </div>
+          </form>
+        )}
+        
+        {/* MODE PREMIÈRE CONNEXION */}
+        {mode === 'firstTime' && !emailVerified && (
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm" style={{ color: theme.gray[600] }}>
+              <strong>Première connexion ?</strong><br />
+              Entrez votre email professionnel. S'il a été enregistré par l'administrateur, vous pourrez créer votre mot de passe.
+            </div>
+            <input 
+              type="email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              placeholder="Votre email professionnel" 
+              required
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+            />
+            
+            {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
+            
+            <button 
+              onClick={verifyEmail}
+              disabled={loading || !email} 
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+              style={{ backgroundColor: theme.primary }}
+            >
+              {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
+                <>
+                  <Check className="w-5 h-5" />
+                  Vérifier mon email
+                </>
+              )}
+            </button>
+            
+            <button 
+              onClick={() => { setMode('login'); setError(''); }} 
+              className="w-full text-sm hover:underline" 
               style={{ color: theme.gray[500] }}
             >
-              Mot de passe oublié ?
-            </button>
-            <br />
-            <button 
-              onClick={() => { setIsSignUp(!isSignUp); setError(''); }} 
-              className="text-sm hover:underline" 
-              style={{ color: theme.primary }}
-            >
-              {isSignUp ? 'Déjà un compte ? Se connecter' : "Pas de compte ? S'inscrire"}
+              ← Retour à la connexion
             </button>
           </div>
         )}
         
-        {forgotMode && (
-          <button 
-            onClick={() => { setForgotMode(false); setError(''); }} 
-            className="w-full mt-4 text-sm hover:underline" 
-            style={{ color: theme.gray[500] }}
-          >
-            ← Retour à la connexion
-          </button>
+        {/* MODE PREMIÈRE CONNEXION - EMAIL VÉRIFIÉ */}
+        {mode === 'firstTime' && emailVerified && (
+          <form onSubmit={handleFirstTimeSignUp} className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-700">
+              ✓ Email vérifié : <strong>{email}</strong><br />
+              Définissez maintenant votre mot de passe.
+            </div>
+            
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="Nouveau mot de passe (min. 6 caractères)" 
+                required 
+                minLength={6}
+                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
+            
+            <input 
+              type={showPassword ? "text" : "password"} 
+              value={confirmPassword} 
+              onChange={(e) => setConfirmPassword(e.target.value)} 
+              placeholder="Confirmer le mot de passe" 
+              required 
+              minLength={6}
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+            />
+            
+            {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
+            
+            <button 
+              type="submit" 
+              disabled={loading} 
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+              style={{ backgroundColor: theme.success }}
+            >
+              {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
+                <>
+                  <UserPlus className="w-5 h-5" />
+                  Créer mon compte
+                </>
+              )}
+            </button>
+            
+            <button 
+              type="button"
+              onClick={() => { setMode('login'); setError(''); setEmailVerified(false); setPassword(''); setConfirmPassword(''); }} 
+              className="w-full text-sm hover:underline" 
+              style={{ color: theme.gray[500] }}
+            >
+              ← Retour à la connexion
+            </button>
+          </form>
+        )}
+        
+        {/* MODE MOT DE PASSE OUBLIÉ */}
+        {mode === 'forgot' && (
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm" style={{ color: theme.gray[600] }}>
+              Entrez votre email pour recevoir un lien de réinitialisation.
+            </div>
+            <input 
+              type="email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              placeholder="Votre email" 
+              required
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+            />
+            
+            {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
+            
+            <button 
+              type="submit" 
+              disabled={loading || !email} 
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+              style={{ backgroundColor: theme.primary }}
+            >
+              {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
+                <>
+                  <Mail className="w-5 h-5" />
+                  Envoyer le lien
+                </>
+              )}
+            </button>
+            
+            <button 
+              type="button"
+              onClick={() => { setMode('login'); setError(''); }} 
+              className="w-full text-sm hover:underline" 
+              style={{ color: theme.gray[500] }}
+            >
+              ← Retour à la connexion
+            </button>
+          </form>
         )}
       </div>
     </div>
