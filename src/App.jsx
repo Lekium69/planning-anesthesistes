@@ -1923,14 +1923,21 @@ const AnesthesistScheduler = () => {
     });
 
     // Compter les jours remplacés pour les titulaires (filtré par période)
+    // On compte les jours UNIQUES où le titulaire a été remplacé
+    const joursRemplacesParTitulaire = {};
     remplacements.forEach(r => {
       if (startDate && r.date < startDate) return;
       if (endDate && r.date > endDate) return;
 
-      const stat = titulairesStats.find(s => s.id === r.titulaire_id);
-      if (stat) {
-        stat.joursRemplaces++;
+      if (!joursRemplacesParTitulaire[r.titulaire_id]) {
+        joursRemplacesParTitulaire[r.titulaire_id] = new Set();
       }
+      joursRemplacesParTitulaire[r.titulaire_id].add(r.date);
+    });
+
+    // Appliquer le compte de jours uniques à chaque titulaire
+    titulairesStats.forEach(stat => {
+      stat.joursRemplaces = joursRemplacesParTitulaire[stat.id]?.size || 0;
     });
 
     // Combiner titulaires et remplaçants
