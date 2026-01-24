@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  Calendar, Users, RefreshCw, Download, Play, TrendingUp, ArrowLeftRight, 
-  X, Check, LogIn, LogOut, Bell, Send, User, Moon, Building2, 
+import {
+  Calendar, Users, RefreshCw, Download, Play, TrendingUp, ArrowLeftRight,
+  X, Check, LogIn, LogOut, Bell, Send, User, Moon, Building2,
   Stethoscope, Star, FileSpreadsheet, Printer, Settings, Home,
   CalendarOff, MessageSquare, Shield, ChevronLeft, ChevronRight,
   Copy, ExternalLink, Clock, AlertCircle, Plus, Trash2, PlusCircle,
@@ -180,7 +180,7 @@ const LoginPage = ({ onLogin }) => {
   const verifyEmail = async () => {
     setLoading(true);
     setError('');
-    
+
     try {
       // Vérifier dans anesthesists
       const { data: anesthData } = await supabase
@@ -188,26 +188,26 @@ const LoginPage = ({ onLogin }) => {
         .select('email')
         .eq('email', email.toLowerCase().trim())
         .single();
-      
+
       if (anesthData) {
         setEmailVerified(true);
         setLoading(false);
         return;
       }
-      
+
       // Vérifier dans iades
       const { data: iadeData } = await supabase
         .from('iades')
         .select('email')
         .eq('email', email.toLowerCase().trim())
         .single();
-      
+
       if (iadeData) {
         setEmailVerified(true);
         setLoading(false);
         return;
       }
-      
+
       setError("Cet email n'est pas autorisé. Contactez l'administrateur pour être ajouté.");
     } catch (err) {
       setError("Cet email n'est pas autorisé. Contactez l'administrateur pour être ajouté.");
@@ -221,34 +221,34 @@ const LoginPage = ({ onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     if (password.length < 6) {
       setError('Le mot de passe doit contenir au moins 6 caractères');
       setLoading(false);
       return;
     }
-    
+
     if (password !== confirmPassword) {
       setError('Les mots de passe ne correspondent pas');
       setLoading(false);
       return;
     }
-    
+
     try {
       // Créer le compte dans Supabase Auth
-      const { data, error } = await supabase.auth.signUp({ 
-        email: email.toLowerCase().trim(), 
-        password 
+      const { data, error } = await supabase.auth.signUp({
+        email: email.toLowerCase().trim(),
+        password
       });
-      
+
       if (error) throw error;
-      
+
       // Connexion automatique après création
-      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ 
-        email: email.toLowerCase().trim(), 
-        password 
+      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password
       });
-      
+
       if (loginError) {
         setMessage('Compte créé ! Vous pouvez maintenant vous connecter.');
         setMode('login');
@@ -274,11 +274,11 @@ const LoginPage = ({ onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ 
-        email: email.toLowerCase().trim(), 
-        password 
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password
       });
       if (error) throw error;
       onLogin(data.user);
@@ -294,7 +294,7 @@ const LoginPage = ({ onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     try {
       // Vérifier que l'email existe
       const { data: anesthData } = await supabase
@@ -302,26 +302,26 @@ const LoginPage = ({ onLogin }) => {
         .select('email')
         .eq('email', email.toLowerCase().trim())
         .single();
-      
+
       const { data: iadeData } = await supabase
         .from('iades')
         .select('email')
         .eq('email', email.toLowerCase().trim())
         .single();
-      
+
       if (!anesthData && !iadeData) {
         setError("Aucun compte associé à cet email");
         setLoading(false);
         return;
       }
-      
+
       // Envoyer le lien de réinitialisation
       const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
         redirectTo: window.location.origin,
       });
-      
+
       if (error) throw error;
-      
+
       setResetSent(true);
     } catch (err) {
       setError(err.message);
@@ -343,7 +343,7 @@ const LoginPage = ({ onLogin }) => {
             Un lien de réinitialisation a été envoyé à <strong>{email}</strong>.<br />
             Vérifiez votre boîte mail (et les spams).
           </p>
-          <button 
+          <button
             onClick={() => { setMode('login'); setResetSent(false); setError(''); }}
             className="font-medium" style={{ color: theme.primary }}
           >
@@ -368,27 +368,27 @@ const LoginPage = ({ onLogin }) => {
             {mode === 'forgot' && 'Mot de passe oublié'}
           </p>
         </div>
-        
+
         {/* MODE CONNEXION */}
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
-            <input 
-              type="email" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              placeholder="Email" 
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
               required
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <div className="relative">
-              <input 
-                type={showPassword ? "text" : "password"} 
-                value={password} 
-                onChange={(e) => setPassword(e.target.value)} 
-                placeholder="Mot de passe" 
-                required 
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Mot de passe"
+                required
                 minLength={6}
-                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
                 type="button"
@@ -398,14 +398,14 @@ const LoginPage = ({ onLogin }) => {
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
-            
+
             {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
             {message && <div className="bg-green-50 text-green-600 px-4 py-3 rounded-xl text-sm">{message}</div>}
-            
-            <button 
-              type="submit" 
-              disabled={loading} 
-              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ backgroundColor: theme.primary }}
             >
               {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
@@ -415,21 +415,21 @@ const LoginPage = ({ onLogin }) => {
                 </>
               )}
             </button>
-            
+
             <div className="mt-4 space-y-2 text-center">
-              <button 
+              <button
                 type="button"
-                onClick={() => { setMode('forgot'); setError(''); setMessage(''); }} 
-                className="text-sm hover:underline" 
+                onClick={() => { setMode('forgot'); setError(''); setMessage(''); }}
+                className="text-sm hover:underline"
                 style={{ color: theme.gray[500] }}
               >
                 Mot de passe oublié ?
               </button>
               <br />
-              <button 
+              <button
                 type="button"
-                onClick={() => { setMode('firstTime'); setError(''); setMessage(''); setEmailVerified(false); }} 
-                className="text-sm font-medium hover:underline" 
+                onClick={() => { setMode('firstTime'); setError(''); setMessage(''); setEmailVerified(false); }}
+                className="text-sm font-medium hover:underline"
                 style={{ color: theme.primary }}
               >
                 🆕 Première connexion ? Créer mon compte
@@ -437,7 +437,7 @@ const LoginPage = ({ onLogin }) => {
             </div>
           </form>
         )}
-        
+
         {/* MODE PREMIÈRE CONNEXION */}
         {mode === 'firstTime' && !emailVerified && (
           <div className="space-y-4">
@@ -445,21 +445,21 @@ const LoginPage = ({ onLogin }) => {
               <strong>Première connexion ?</strong><br />
               Entrez votre email professionnel. S'il a été enregistré par l'administrateur, vous pourrez créer votre mot de passe.
             </div>
-            <input 
-              type="email" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              placeholder="Votre email professionnel" 
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Votre email professionnel"
               required
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            
+
             {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
-            
-            <button 
+
+            <button
               onClick={verifyEmail}
-              disabled={loading || !email} 
-              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+              disabled={loading || !email}
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ backgroundColor: theme.primary }}
             >
               {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
@@ -469,17 +469,17 @@ const LoginPage = ({ onLogin }) => {
                 </>
               )}
             </button>
-            
-            <button 
-              onClick={() => { setMode('login'); setError(''); }} 
-              className="w-full text-sm hover:underline" 
+
+            <button
+              onClick={() => { setMode('login'); setError(''); }}
+              className="w-full text-sm hover:underline"
               style={{ color: theme.gray[500] }}
             >
               ← Retour à la connexion
             </button>
           </div>
         )}
-        
+
         {/* MODE PREMIÈRE CONNEXION - EMAIL VÉRIFIÉ */}
         {mode === 'firstTime' && emailVerified && (
           <form onSubmit={handleFirstTimeSignUp} className="space-y-4">
@@ -487,16 +487,16 @@ const LoginPage = ({ onLogin }) => {
               ✓ Email vérifié : <strong>{email}</strong><br />
               Définissez maintenant votre mot de passe.
             </div>
-            
+
             <div className="relative">
-              <input 
-                type={showPassword ? "text" : "password"} 
-                value={password} 
-                onChange={(e) => setPassword(e.target.value)} 
-                placeholder="Nouveau mot de passe (min. 6 caractères)" 
-                required 
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Nouveau mot de passe (min. 6 caractères)"
+                required
                 minLength={6}
-                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
                 type="button"
@@ -506,23 +506,23 @@ const LoginPage = ({ onLogin }) => {
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
-            
-            <input 
-              type={showPassword ? "text" : "password"} 
-              value={confirmPassword} 
-              onChange={(e) => setConfirmPassword(e.target.value)} 
-              placeholder="Confirmer le mot de passe" 
-              required 
+
+            <input
+              type={showPassword ? "text" : "password"}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirmer le mot de passe"
+              required
               minLength={6}
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            
+
             {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
-            
-            <button 
-              type="submit" 
-              disabled={loading} 
-              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ backgroundColor: theme.success }}
             >
               {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
@@ -532,39 +532,39 @@ const LoginPage = ({ onLogin }) => {
                 </>
               )}
             </button>
-            
-            <button 
+
+            <button
               type="button"
-              onClick={() => { setMode('login'); setError(''); setEmailVerified(false); setPassword(''); setConfirmPassword(''); }} 
-              className="w-full text-sm hover:underline" 
+              onClick={() => { setMode('login'); setError(''); setEmailVerified(false); setPassword(''); setConfirmPassword(''); }}
+              className="w-full text-sm hover:underline"
               style={{ color: theme.gray[500] }}
             >
               ← Retour à la connexion
             </button>
           </form>
         )}
-        
+
         {/* MODE MOT DE PASSE OUBLIÉ */}
         {mode === 'forgot' && (
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm" style={{ color: theme.gray[600] }}>
               Entrez votre email pour recevoir un lien de réinitialisation.
             </div>
-            <input 
-              type="email" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              placeholder="Votre email" 
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Votre email"
               required
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            
+
             {error && <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">{error}</div>}
-            
-            <button 
-              type="submit" 
-              disabled={loading || !email} 
-              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50" 
+
+            <button
+              type="submit"
+              disabled={loading || !email}
+              className="w-full text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ backgroundColor: theme.primary }}
             >
               {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : (
@@ -574,11 +574,11 @@ const LoginPage = ({ onLogin }) => {
                 </>
               )}
             </button>
-            
-            <button 
+
+            <button
               type="button"
-              onClick={() => { setMode('login'); setError(''); }} 
-              className="w-full text-sm hover:underline" 
+              onClick={() => { setMode('login'); setError(''); }}
+              className="w-full text-sm hover:underline"
               style={{ color: theme.gray[500] }}
             >
               ← Retour à la connexion
@@ -595,7 +595,7 @@ const LoginPage = ({ onLogin }) => {
 // ============================================
 const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
   const TARGET_ETP = 4.0; // 400% = 4 ETP
-  
+
   // État local pour les modifications
   const [etpValues, setEtpValues] = useState(() => {
     const initial = {};
@@ -636,7 +636,7 @@ const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
           <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
             Ajustez le pourcentage de temps de travail. Le total doit être égal à <strong>{TARGET_ETP * 100}%</strong> ({TARGET_ETP} ETP).
           </p>
-          
+
           {/* Indicateur du total */}
           <div className={`mb-4 p-3 rounded-xl flex items-center justify-between ${isValid ? 'bg-green-50' : 'bg-red-50'}`}>
             <span className="font-medium">Total ETP :</span>
@@ -644,7 +644,7 @@ const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
               {totalPercent}% / {TARGET_ETP * 100}%
             </span>
           </div>
-          
+
           <div className="space-y-3 max-h-80 overflow-y-auto">
             {anesthesists.map(a => (
               <div key={a.id} className="flex items-center justify-between p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
@@ -653,12 +653,12 @@ const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
                   <span className="font-medium">{a.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
                     step="5"
-                    value={Math.round(etpValues[a.id] * 100)} 
+                    value={Math.round(etpValues[a.id] * 100)}
                     onChange={(e) => handleChange(a.id, parseInt(e.target.value) / 100)}
                     className="w-24"
                   />
@@ -669,16 +669,16 @@ const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
               </div>
             ))}
           </div>
-          
+
           <div className="mt-6 flex gap-3">
-            <button 
+            <button
               onClick={onClose}
               className="flex-1 py-3 rounded-xl font-medium border"
               style={{ borderColor: theme.gray[300], color: theme.gray[600] }}
             >
               Annuler
             </button>
-            <button 
+            <button
               onClick={handleSave}
               disabled={!isValid}
               className={`flex-1 py-3 rounded-xl font-medium text-white ${!isValid ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -717,7 +717,7 @@ const AnesthesistScheduler = () => {
   const [exchangeBoard, setExchangeBoard] = useState([]);
   const [unavailabilities, setUnavailabilities] = useState([]);
   const [emailPreferences, setEmailPreferences] = useState({});
-  
+
   // IADES
   const [iades, setIades] = useState([]);
   const [scheduleIades, setScheduleIades] = useState({});
@@ -728,7 +728,7 @@ const AnesthesistScheduler = () => {
   const [showIadesInPlanning, setShowIadesInPlanning] = useState(true);
   const [iadesHeures, setIadesHeures] = useState([]);
   const [currentIade, setCurrentIade] = useState(null);
-  
+
   // Modals
   const [editingRemplacant, setEditingRemplacant] = useState(null);
   const [editingAnesth, setEditingAnesth] = useState(null);
@@ -758,19 +758,19 @@ const AnesthesistScheduler = () => {
   // - admin: accès total (planning anesth, génération auto, gestion utilisateurs)
   // - user: anesthésiste (échanges, indispo, consultation)
   // - viewer: lecteur (consultation planning + listes uniquement)
-  // 
+  //
   // Champ is_iade_admin (boolean) dans anesthesists:
   // - Si true, l'anesthésiste peut aussi gérer le planning IADE et les accès IADE
   //
   // Rôles table iades:
   // - iade: IADE (consultation planning anesth + IADE + listes)
-  
+
   const isAdmin = currentUser?.role === 'admin';
   const isViewer = currentUser?.role === 'viewer';
   const isIade = currentUser?.role === 'iade';
   const isAnesthesiste = currentUser?.role === 'user';
   const isIadeAdmin = currentUser?.is_iade_admin === true;
-  
+
   // Permissions dérivées
   const canEditPlanning = isAdmin; // Seul l'admin peut modifier le planning anesthésiste
   const canEditIadePlanning = isAdmin || isIadeAdmin; // Admin ou Admin IADE peut modifier le planning IADE
@@ -781,7 +781,7 @@ const AnesthesistScheduler = () => {
   const canSetUnavailability = isAdmin || isAnesthesiste; // Admin et anesthésistes peuvent saisir des indispos
   const canViewPlanning = true; // Tout le monde peut voir les plannings
   const canViewContacts = true; // Tout le monde peut voir les coordonnées
-  
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
   // ============================================
@@ -799,13 +799,13 @@ const AnesthesistScheduler = () => {
         setShowPasswordReset(true);
       }
     });
-    
+
     // Vérifier aussi l'URL pour le token de recovery
     const hash = window.location.hash;
     if (hash && hash.includes('type=recovery')) {
       setShowPasswordReset(true);
     }
-    
+
     return () => subscription.unsubscribe();
   }, []);
 
@@ -814,7 +814,7 @@ const AnesthesistScheduler = () => {
   // ============================================
   const loadData = useCallback(async () => {
     if (!user) return;
-    
+
     try {
       const [anesth, rempl, replmts, sched, hol, notif, swaps, exchange, unavail, iadesData, schedIades, heuresData] = await Promise.all([
         supabase.from('anesthesists').select('*').order('id'),
@@ -840,7 +840,7 @@ const AnesthesistScheduler = () => {
           color: DISTINCT_COLORS[index % DISTINCT_COLORS.length]
         }));
         setAnesthesists(anesthWithColors);
-        
+
         // Chercher si l'utilisateur est un anesthésiste
         const profile = anesthWithColors.find(a => a.email === user.email);
         if (profile) {
@@ -851,7 +851,7 @@ const AnesthesistScheduler = () => {
           const { data: prefs } = await supabase.from('email_preferences').select('*').eq('anesthesist_id', profile.id).single();
           if (prefs) setEmailPreferences(prefs);
         }
-        
+
         // Ne réinitialiser les filtres qu'au premier chargement (seulement titulaires ETP >= 0.2)
         if (selectedFilters.size === 0 && !filtersInitialized.current) {
           const titulaires = anesthWithColors.filter(a => isTitulaire(a));
@@ -868,15 +868,15 @@ const AnesthesistScheduler = () => {
         sched.data.forEach(item => {
           if (!scheduleMap[item.date]) scheduleMap[item.date] = {};
           if (!scheduleMap[item.date][item.shift]) scheduleMap[item.date][item.shift] = [];
-          
+
           if (item.anesthesist_id) {
             // C'est un titulaire
             scheduleMap[item.date][item.shift].push({ type: 'titulaire', id: item.anesthesist_id });
           } else if (item.remplacant_name) {
             // C'est un remplaçant
-            scheduleMap[item.date][item.shift].push({ 
-              type: 'remplacant', 
-              name: item.remplacant_name, 
+            scheduleMap[item.date][item.shift].push({
+              type: 'remplacant',
+              name: item.remplacant_name,
               scheduleId: item.id
             });
           }
@@ -892,7 +892,7 @@ const AnesthesistScheduler = () => {
           color: i.is_titulaire ? IADES_COLORS[index % IADES_COLORS.length] : '#6b7280'
         }));
         setIades(iadesWithColors);
-        
+
         // Vérifier si l'utilisateur est un IADE (si pas déjà identifié comme anesthésiste)
         if (!currentUser) {
           const iadeProfile = iadesWithColors.find(i => i.email === user.email);
@@ -901,7 +901,7 @@ const AnesthesistScheduler = () => {
             setCurrentUser({ ...iadeProfile, role: 'iade', name: iadeProfile.name });
           }
         }
-        
+
         // Initialiser les filtres IADES
         if (selectedIadesFilters.size === 0) {
           setSelectedIadesFilters(new Set(iadesWithColors.map(i => i.id)));
@@ -914,13 +914,13 @@ const AnesthesistScheduler = () => {
         schedIades.data.forEach(item => {
           if (!scheduleIadesMap[item.date]) scheduleIadesMap[item.date] = {};
           if (!scheduleIadesMap[item.date][item.shift]) scheduleIadesMap[item.date][item.shift] = [];
-          
+
           if (item.iade_id) {
             scheduleIadesMap[item.date][item.shift].push({ type: 'titulaire', id: item.iade_id, scheduleId: item.id });
           } else if (item.remplacant_name) {
-            scheduleIadesMap[item.date][item.shift].push({ 
-              type: 'remplacant', 
-              name: item.remplacant_name, 
+            scheduleIadesMap[item.date][item.shift].push({
+              type: 'remplacant',
+              name: item.remplacant_name,
               scheduleId: item.id
             });
           }
@@ -994,13 +994,13 @@ const AnesthesistScheduler = () => {
   const isEveOfHolidayOrWeekend = (date, holidaysList) => {
     const nextDay = new Date(date);
     nextDay.setDate(nextDay.getDate() + 1);
-    
+
     // Si demain est samedi (donc aujourd'hui vendredi)
     if (nextDay.getDay() === 6) return true;
-    
+
     // Si demain est un jour férié (et pas un WE)
     if (isHolidayDate(nextDay, holidaysList) && !isWeekend(nextDay)) return true;
-    
+
     return false;
   };
   // ============================================
@@ -1017,9 +1017,9 @@ const AnesthesistScheduler = () => {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       let startDate, endDate;
-      
+
       if (mode === 'range' && rangeStart && rangeEnd) {
         startDate = new Date(rangeStart);
         endDate = new Date(rangeEnd);
@@ -1044,7 +1044,7 @@ const AnesthesistScheduler = () => {
 
       // Anesthésistes actifs
       const activeAnesth = anesthesists.filter(a => a.role !== 'viewer');
-      
+
       if (activeAnesth.length < 3) {
         alert('Il faut au moins 3 anesthésistes actifs pour générer le planning');
         return;
@@ -1055,11 +1055,11 @@ const AnesthesistScheduler = () => {
       // ============================================
       const stats = {};
       activeAnesth.forEach(a => {
-        stats[a.id] = { 
-          semaines: 0, 
-          we: 0, 
-          ferie: 0, 
-          etp: a.etp || 0.5 
+        stats[a.id] = {
+          semaines: 0,
+          we: 0,
+          ferie: 0,
+          etp: a.etp || 0.5
         };
       });
 
@@ -1090,7 +1090,7 @@ const AnesthesistScheduler = () => {
         .delete()
         .gte('date', formatDateKey(startDate))
         .lte('date', formatDateKey(endDate));
-      
+
       if (delErr) console.error('Erreur delete:', delErr);
 
       // Jours fériés
@@ -1134,13 +1134,13 @@ const AnesthesistScheduler = () => {
       };
 
       const inserts = [];
-      
+
       // ============================================
       // COLLECTER LES SEMAINES
       // ============================================
       const weeks = [];
       let currentMonday = new Date(startDate);
-      
+
       while (currentMonday <= endDate) {
         weeks.push({
           monday: new Date(currentMonday),
@@ -1152,7 +1152,7 @@ const AnesthesistScheduler = () => {
 
       // ============================================
       // PRIORITÉ 1 + 2 + 3: ASSIGNER PAR SEMAINE COMPLÈTE
-      // Pour chaque semaine: 
+      // Pour chaque semaine:
       // - Choisir 3 personnes disponibles TOUTE la semaine (lun-dim)
       // - Celui avec le moins de WE (équilibré) sera en position B (astreinte vendredi = WE)
       // - Rotation des postes dans la semaine
@@ -1166,11 +1166,11 @@ const AnesthesistScheduler = () => {
         [0, 1, 2], // Jeudi:    A=astr+bloc, B=bloc, C=consult
         [1, 2, 0], // Vendredi: B=astr+bloc, C=bloc, A=consult (B fait le WE!)
       ];
-      
+
       for (const week of weeks) {
         // Trouver qui est disponible TOUTE la semaine (lun-dim)
         const availForFullWeek = activeAnesth.filter(a => isAvailableForWeek(a.id, week.monday));
-        
+
         if (availForFullWeek.length < 3) {
           console.warn(`Semaine ${week.weekKey}: seulement ${availForFullWeek.length} personnes disponibles toute la semaine`);
           // TODO: gérer ce cas (semaine partielle)
@@ -1180,7 +1180,7 @@ const AnesthesistScheduler = () => {
         // PRIORITÉ 3: Équilibrer les WE
         // La personne B fait l'astreinte vendredi, donc fait le WE
         // On choisit celle avec le moins de WE pour la position B
-        
+
         // Trier par nombre de WE (équilibré par ETP)
         const sortedByWE = [...availForFullWeek].sort((a, b) => {
           const scoreA = stats[a.id].we / stats[a.id].etp;
@@ -1190,14 +1190,14 @@ const AnesthesistScheduler = () => {
 
         // Position B = celui avec le moins de WE (il fera le WE)
         const personB = sortedByWE[0];
-        
+
         // Positions A et C parmi les restants
         const remaining = sortedByWE.filter(a => a.id !== personB.id);
         const personA = remaining[0];
         const personC = remaining[1];
 
         const weekTeam = [personA, personB, personC];
-        
+
         stats[personA.id].semaines++;
         stats[personB.id].semaines++;
         stats[personC.id].semaines++;
@@ -1211,21 +1211,21 @@ const AnesthesistScheduler = () => {
           const d = new Date(week.monday);
           d.setDate(d.getDate() + dayIndex);
           const dk = formatDateKey(d);
-          
+
           // Si jour férié en semaine
           if (holidaySet.has(dk)) {
             // PRIORITÉ 2: Astreinte férié = astreinte de la veille
             // La veille = dayIndex-1, on regarde qui était d'astreinte
             const [prevAstrIdx] = dayIndex > 0 ? rotationPattern[dayIndex - 1] : [1]; // Si lundi férié, prendre B (astreinte vendredi précédent)
             const feriePerson = weekTeam[prevAstrIdx];
-            
+
             inserts.push({ date: dk, shift: 'astreinte_ferie', anesthesist_id: feriePerson.id, year: d.getFullYear() });
             stats[feriePerson.id].ferie++;
             continue;
           }
-          
+
           const [astrIdx, blocIdx, consIdx] = rotationPattern[dayIndex];
-          
+
           const astrPerson = weekTeam[astrIdx];
           const blocPerson = weekTeam[blocIdx];
           const consPerson = weekTeam[consIdx];
@@ -1249,12 +1249,12 @@ const AnesthesistScheduler = () => {
         saturday.setDate(saturday.getDate() + 5);
         const sunday = new Date(week.monday);
         sunday.setDate(sunday.getDate() + 6);
-        
+
         // Vérifier que le WE est dans la plage
         if (saturday <= endDate) {
           const satKey = formatDateKey(saturday);
           const sunKey = formatDateKey(sunday);
-          
+
           // B était d'astreinte vendredi, donc fait le WE
           inserts.push({ date: satKey, shift: 'astreinte_we', anesthesist_id: personB.id, year: saturday.getFullYear() });
           inserts.push({ date: sunKey, shift: 'astreinte_we', anesthesist_id: personB.id, year: sunday.getFullYear() });
@@ -1285,8 +1285,8 @@ const AnesthesistScheduler = () => {
       }
 
       await loadData();
-      
-      const modeLabel = mode === 'range' 
+
+      const modeLabel = mode === 'range'
         ? `Plage du ${new Date(rangeStart).toLocaleDateString('fr-FR')} au ${new Date(rangeEnd).toLocaleDateString('fr-FR')}`
         : 'Planning intégral 18 mois';
       alert(`✅ ${modeLabel}\n\n${inserts.length} entrées générées\n\n• Semaines complètes (3 personnes/semaine)\n• Astreinte WE = astreinte du vendredi\n• WE et fériés équilibrés`);
@@ -1314,7 +1314,7 @@ const AnesthesistScheduler = () => {
     }
     await loadData();
   };
-  
+
   // Supprimer un remplaçant du planning
   const removeRemplacant = async (scheduleId) => {
     if (!canEditPlanning) return;
@@ -1373,7 +1373,7 @@ const AnesthesistScheduler = () => {
   // ============================================
   const saveRemplacant = async (remplacant) => {
     if (!canEditPlanning) return;
-    
+
     if (remplacant.id) {
       await supabase.from('remplacants').update({
         name: remplacant.name,
@@ -1392,7 +1392,7 @@ const AnesthesistScheduler = () => {
         notes: remplacant.notes
       });
     }
-    
+
     setEditingRemplacant(null);
     await loadData();
   };
@@ -1400,7 +1400,7 @@ const AnesthesistScheduler = () => {
   const deleteRemplacant = async (id) => {
     if (!canEditPlanning) return;
     if (!window.confirm('Supprimer ce remplaçant ?')) return;
-    
+
     await supabase.from('remplacants').update({ actif: false }).eq('id', id);
     await loadData();
   };
@@ -1410,7 +1410,7 @@ const AnesthesistScheduler = () => {
   // ============================================
   const saveAnesthesist = async (anesth) => {
     if (!canManageAnesthesists) return;
-    
+
     if (anesth.id) {
       await supabase.from('anesthesists').update({
         name: anesth.name,
@@ -1430,7 +1430,7 @@ const AnesthesistScheduler = () => {
         is_iade_admin: anesth.is_iade_admin || false
       });
     }
-    
+
     setEditingAnesth(null);
     await loadData();
   };
@@ -1438,19 +1438,19 @@ const AnesthesistScheduler = () => {
   // Fonction pour changer le mot de passe
   const updatePassword = async () => {
     setPasswordError('');
-    
+
     if (newPassword.length < 6) {
       setPasswordError('Le mot de passe doit contenir au moins 6 caractères');
       return;
     }
-    
+
     if (newPassword !== confirmPassword) {
       setPasswordError('Les mots de passe ne correspondent pas');
       return;
     }
-    
+
     const { error } = await supabase.auth.updateUser({ password: newPassword });
-    
+
     if (error) {
       setPasswordError(error.message);
     } else {
@@ -1466,7 +1466,7 @@ const AnesthesistScheduler = () => {
   const deleteAnesthesist = async (id) => {
     if (!canManageAnesthesists) return;
     if (!window.confirm('Supprimer ce médecin ? (Les données de planning seront conservées)')) return;
-    
+
     await supabase.from('anesthesists').delete().eq('id', id);
     await loadData();
   };
@@ -1476,10 +1476,10 @@ const AnesthesistScheduler = () => {
   // ============================================
   const addRemplacement = async (date, shift, remplacantId, titulaireId) => {
     if (!canEditPlanning) return;
-    
+
     const remplacant = remplacants.find(r => r.id === remplacantId);
     if (!remplacant) return;
-    
+
     // Vérifier si ce remplacement existe déjà (éviter doublons)
     const { data: existing } = await supabase
       .from('remplacements')
@@ -1488,7 +1488,7 @@ const AnesthesistScheduler = () => {
       .eq('shift', shift)
       .eq('remplacant_name', remplacant.name)
       .single();
-    
+
     if (!existing) {
       // 1. Enregistrer dans l'historique des remplacements
       await supabase.from('remplacements').insert({
@@ -1499,7 +1499,7 @@ const AnesthesistScheduler = () => {
         titulaire_id: titulaireId
       });
     }
-    
+
     // 2. Vérifier si déjà dans le planning
     const { data: existingSchedule } = await supabase
       .from('schedule')
@@ -1508,7 +1508,7 @@ const AnesthesistScheduler = () => {
       .eq('shift', shift)
       .eq('remplacant_name', remplacant.name)
       .single();
-    
+
     if (!existingSchedule) {
       // Ajouter le remplaçant au planning
       const year = new Date(date).getFullYear();
@@ -1519,12 +1519,12 @@ const AnesthesistScheduler = () => {
         remplacant_name: remplacant.name,
         year
       });
-      
+
       if (error) {
         console.error('Erreur ajout schedule:', error);
       }
     }
-    
+
     setReplacementModal(null);
     await loadData();
   };
@@ -1563,7 +1563,7 @@ const AnesthesistScheduler = () => {
     if (!canEditIadePlanning) return;
     const dateKey = formatDateKey(date);
     const year = new Date(date).getFullYear();
-    
+
     const insertData = {
       date: dateKey,
       shift,
@@ -1571,7 +1571,7 @@ const AnesthesistScheduler = () => {
       iade_id: isRemplacant ? null : iadeId,
       remplacant_name: isRemplacant ? remplacantName : null
     };
-    
+
     const { error } = await supabase.from('schedule_iades').insert(insertData);
     if (!error) await loadData();
     return error;
@@ -1586,7 +1586,7 @@ const AnesthesistScheduler = () => {
   const getAssignedIades = (date, shift) => {
     const key = formatDateKey(date);
     const entries = scheduleIades[key]?.[shift] || [];
-    
+
     return entries.map(entry => {
       if (entry.type === 'titulaire') {
         const iade = iades.find(i => i.id === entry.id);
@@ -1594,10 +1594,10 @@ const AnesthesistScheduler = () => {
           return { ...iade, isRemplacant: false, scheduleId: entry.scheduleId };
         }
       } else if (entry.type === 'remplacant') {
-        return { 
-          id: `r_${entry.scheduleId}`, 
-          name: entry.name, 
-          color: '#6b7280', 
+        return {
+          id: `r_${entry.scheduleId}`,
+          name: entry.name,
+          color: '#6b7280',
           isRemplacant: true,
           scheduleId: entry.scheduleId
         };
@@ -1608,7 +1608,7 @@ const AnesthesistScheduler = () => {
 
   const calculateIadesStats = (startDate = null, endDate = null) => {
     const stats = {};
-    
+
     // Initialiser les stats pour tous les IADES
     iades.forEach(iade => {
       stats[iade.id] = {
@@ -1618,12 +1618,12 @@ const AnesthesistScheduler = () => {
         journees: {}
       };
     });
-    
+
     // Compter les jours travaillés
     Object.entries(scheduleIades).forEach(([dateKey, shifts]) => {
       if (startDate && dateKey < startDate) return;
       if (endDate && dateKey > endDate) return;
-      
+
       Object.entries(shifts).forEach(([shift, entries]) => {
         entries.forEach(entry => {
           if (entry.type === 'titulaire' && stats[entry.id]) {
@@ -1635,7 +1635,7 @@ const AnesthesistScheduler = () => {
         });
       });
     });
-    
+
     // Ajouter les heures déclarées
     iadesHeures.forEach(h => {
       if (startDate && h.date < startDate) return;
@@ -1644,27 +1644,27 @@ const AnesthesistScheduler = () => {
         stats[h.iade_id].totalHeures += h.heures || 0;
       }
     });
-    
+
     return Object.values(stats);
   };
 
   // Fonctions pour les heures IADES
   const saveIadeHeures = async (iadeId, date, heures, commentaire = '') => {
     const dateKey = formatDateKey(date);
-    
+
     // Vérifier si une entrée existe déjà
     const existing = iadesHeures.find(h => h.iade_id === iadeId && h.date === dateKey);
-    
+
     if (existing) {
       const { error } = await supabase.from('iades_heures').update({ heures, commentaire }).eq('id', existing.id);
       if (!error) await loadData();
       return error;
     } else {
-      const { error } = await supabase.from('iades_heures').insert({ 
-        iade_id: iadeId, 
-        date: dateKey, 
-        heures, 
-        commentaire 
+      const { error } = await supabase.from('iades_heures').insert({
+        iade_id: iadeId,
+        date: dateKey,
+        heures,
+        commentaire
       });
       if (!error) await loadData();
       return error;
@@ -1681,7 +1681,7 @@ const AnesthesistScheduler = () => {
   // ============================================
   const getIncoherences = () => {
     const incoherences = [];
-    
+
     Object.entries(schedule).forEach(([dateStr, shifts]) => {
       const date = new Date(dateStr);
       const isWE = isWeekend(date);
@@ -1764,10 +1764,10 @@ const AnesthesistScheduler = () => {
           // Vérifier aussi les remplaçants par nom
           const astreinteRemplacants = astreinte.filter(e => e.type === 'remplacant').map(e => e.name);
           const blocRemplacants = bloc.filter(e => e.type === 'remplacant').map(e => e.name);
-          
+
           const titulaireMatch = astreinteIds.some(id => blocIds.includes(id));
           const remplacantMatch = astreinteRemplacants.some(name => blocRemplacants.includes(name));
-          
+
           if (!titulaireMatch && !remplacantMatch) {
             incoherences.push({
               date: dateStr,
@@ -1784,10 +1784,10 @@ const AnesthesistScheduler = () => {
           const consultationIds = getIds(consultation);
           const blocRemplacants = bloc.filter(e => e.type === 'remplacant').map(e => e.name);
           const consultationRemplacants = consultation.filter(e => e.type === 'remplacant').map(e => e.name);
-          
+
           const sameTitulaire = blocIds.some(id => consultationIds.includes(id));
           const sameRemplacant = blocRemplacants.some(name => consultationRemplacants.includes(name));
-          
+
           if (sameTitulaire || sameRemplacant) {
             incoherences.push({
               date: dateStr,
@@ -1814,22 +1814,24 @@ const AnesthesistScheduler = () => {
   const calculateFullStats = (startDate = null, endDate = null) => {
     // Stats pour les titulaires
     const titulairesStats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
-      ...a, 
-      bloc: 0, 
-      consultation: 0, 
-      astreinte: 0, 
-      we: 0, 
-      ferie: 0, 
+      ...a,
+      bloc: 0,
+      consultation: 0,
+      astreinte: 0,
+      we: 0,
+      ferie: 0,
       total: 0,
+      blocAstreinte: 0, // Nouveau: jours avec bloc ET astreinte
       joursRemplaces: 0,
       etp: a.etp || 0.5,
-      isTitulaire: true
+      isTitulaire: true,
+      _datesPresence: new Set() // Pour calculer les jours uniques
     }));
 
     // Stats pour les remplaçants
     const remplacantsStatsMap = {};
-    
-    // Compter les jours travaillés
+
+    // D'abord, collecter tous les shifts par date et par personne
     Object.entries(schedule).forEach(([dateKey, shifts]) => {
       // Filtrer par période si définie
       if (startDate && dateKey < startDate) return;
@@ -1838,7 +1840,7 @@ const AnesthesistScheduler = () => {
       const date = new Date(dateKey);
       const isWE = isWeekend(date);
       const isHol = isHoliday(date);
-      
+
       // Si férié dans un WE, ne pas compter le férié (seulement le WE)
       const isFerieInWE = isHol && isWE;
 
@@ -1847,13 +1849,12 @@ const AnesthesistScheduler = () => {
           if (entry.type === 'titulaire') {
             const stat = titulairesStats.find(s => s.id === entry.id);
             if (stat) {
-              stat.total++;
+              stat._datesPresence.add(dateKey);
               if (shift === 'bloc') stat.bloc++;
               else if (shift === 'consultation') stat.consultation++;
               else if (shift === 'astreinte') stat.astreinte++;
               else if (shift === 'astreinte_we') stat.we++;
               else if (shift === 'astreinte_ferie') {
-                // Ne pas compter le férié s'il est dans un WE
                 if (!isFerieInWE) stat.ferie++;
               }
             }
@@ -1864,16 +1865,31 @@ const AnesthesistScheduler = () => {
                 name: entry.name,
                 color: theme.gray[500],
                 bloc: 0, consultation: 0, astreinte: 0, we: 0, ferie: 0, total: 0,
+                blocAstreinte: 0,
                 joursRemplaces: 0,
                 etp: 0,
-                isTitulaire: false
+                isTitulaire: false,
+                _datesPresence: new Set(),
+                _datesBlocAstreinte: {} // Pour tracker bloc+astreinte par date
               };
             }
             const stat = remplacantsStatsMap[entry.name];
-            stat.total++;
-            if (shift === 'bloc') stat.bloc++;
+            stat._datesPresence.add(dateKey);
+
+            // Tracker les shifts par date pour détecter bloc+astreinte
+            if (!stat._datesBlocAstreinte[dateKey]) {
+              stat._datesBlocAstreinte[dateKey] = { bloc: false, astreinte: false };
+            }
+
+            if (shift === 'bloc') {
+              stat.bloc++;
+              stat._datesBlocAstreinte[dateKey].bloc = true;
+            }
             else if (shift === 'consultation') stat.consultation++;
-            else if (shift === 'astreinte') stat.astreinte++;
+            else if (shift === 'astreinte') {
+              stat.astreinte++;
+              stat._datesBlocAstreinte[dateKey].astreinte = true;
+            }
             else if (shift === 'astreinte_we') stat.we++;
             else if (shift === 'astreinte_ferie') {
               if (!isFerieInWE) stat.ferie++;
@@ -1883,11 +1899,34 @@ const AnesthesistScheduler = () => {
       });
     });
 
+    // Calculer le total (jours uniques) et bloc+astreinte pour les remplaçants
+    Object.values(remplacantsStatsMap).forEach(stat => {
+      // Total = nombre de jours uniques de présence
+      stat.total = stat._datesPresence.size;
+
+      // Compter les jours où le remplaçant a fait bloc ET astreinte
+      Object.values(stat._datesBlocAstreinte).forEach(dayShifts => {
+        if (dayShifts.bloc && dayShifts.astreinte) {
+          stat.blocAstreinte++;
+        }
+      });
+
+      // Nettoyer les propriétés temporaires
+      delete stat._datesPresence;
+      delete stat._datesBlocAstreinte;
+    });
+
+    // Calculer le total pour les titulaires
+    titulairesStats.forEach(stat => {
+      stat.total = stat._datesPresence.size;
+      delete stat._datesPresence;
+    });
+
     // Compter les jours remplacés pour les titulaires (filtré par période)
     remplacements.forEach(r => {
       if (startDate && r.date < startDate) return;
       if (endDate && r.date > endDate) return;
-      
+
       const stat = titulairesStats.find(s => s.id === r.titulaire_id);
       if (stat) {
         stat.joursRemplaces++;
@@ -1916,12 +1955,12 @@ const AnesthesistScheduler = () => {
   // ============================================
   const calculateStats = () => {
     const stats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
-      ...a, 
-      bloc: 0, 
-      consultation: 0, 
-      astreinte: 0, 
-      we: 0, 
-      ferie: 0, 
+      ...a,
+      bloc: 0,
+      consultation: 0,
+      astreinte: 0,
+      we: 0,
+      ferie: 0,
       total: 0,
       etp: a.etp || 0.5
     }));
@@ -1978,7 +2017,7 @@ const AnesthesistScheduler = () => {
   const getAssigned = (date, shift) => {
     const key = formatDateKey(date);
     const entries = schedule[key]?.[shift] || [];
-    
+
     return entries.map(entry => {
       if (entry.type === 'titulaire') {
         const anesth = anesthesists.find(a => a.id === entry.id);
@@ -1991,11 +2030,11 @@ const AnesthesistScheduler = () => {
           // Chercher qui est remplacé dans l'historique
           const repl = remplacements.find(r => r.date === key && r.shift === shift && r.remplacant_name === entry.name);
           const titulaire = repl ? anesthesists.find(t => t.id === repl.titulaire_id) : null;
-          
-          return { 
-            id: `r_${entry.scheduleId}`, 
-            name: entry.name, 
-            color: theme.gray[500], 
+
+          return {
+            id: `r_${entry.scheduleId}`,
+            name: entry.name,
+            color: theme.gray[500],
             isRemplacant: true,
             scheduleId: entry.scheduleId,
             titulaireRemplace: titulaire?.name || null
@@ -2070,7 +2109,7 @@ const AnesthesistScheduler = () => {
               )}
             </button>
           ))}
-          
+
           {/* Section IADES avec sous-menu */}
           <div className="mt-3 pt-3 border-t border-white/20">
             <button
@@ -2083,7 +2122,7 @@ const AnesthesistScheduler = () => {
               <span className="font-medium">IADES</span>
               <ChevronRight className={`w-4 h-4 ml-auto transition-transform ${iadesMenuOpen ? 'rotate-90' : ''}`} />
             </button>
-            
+
             {iadesMenuOpen && (
               <div className="ml-4 space-y-1">
                 <button
@@ -2260,16 +2299,16 @@ const AnesthesistScheduler = () => {
                     </button>
                     {canEditPlanning && (
                       <>
-                        <button 
-                          onClick={() => setShowETPModal(true)} 
+                        <button
+                          onClick={() => setShowETPModal(true)}
                           className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium flex items-center gap-2"
                         >
                           <Percent className="w-4 h-4" /> ETP
                         </button>
-                        <button 
-                          onClick={() => setShowGenerateModal(true)} 
-                          disabled={isGenerating} 
-                          className="px-4 py-2 rounded-xl text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50" 
+                        <button
+                          onClick={() => setShowGenerateModal(true)}
+                          disabled={isGenerating}
+                          className="px-4 py-2 rounded-xl text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50"
                           style={{ backgroundColor: theme.success }}
                         >
                           {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
@@ -2296,8 +2335,8 @@ const AnesthesistScheduler = () => {
                   </button>
                   <button onClick={() => { setCurrentWeekStart(getMonday(new Date())); setCurrentMonth(new Date()); }} className="px-4 py-2 rounded-xl text-sm" style={{ backgroundColor: theme.gray[100] }}>Aujourd'hui</button>
                   <span className="font-bold min-w-[200px] text-center">
-                    {viewMode === 'week' 
-                      ? `Semaine ${getWeekNumber(currentWeekStart)} - ${currentWeekStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}` 
+                    {viewMode === 'week'
+                      ? `Semaine ${getWeekNumber(currentWeekStart)} - ${currentWeekStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
                       : currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
                   </span>
                   <button onClick={() => {
@@ -2369,8 +2408,8 @@ const AnesthesistScheduler = () => {
                                 <span className="text-xs font-medium" style={{ color: theme.gray[500] }}>{getShiftLabel(shift)}</span>
                               </div>
                               {getAssigned(d, shift).map(a => (
-                                <div 
-                                  key={a.id} 
+                                <div
+                                  key={a.id}
                                   onClick={() => {
                                     if (!canEditPlanning) return;
                                     if (a.isRemplacant) {
@@ -2378,8 +2417,8 @@ const AnesthesistScheduler = () => {
                                     } else {
                                       toggleAssignment(d, a.id, shift);
                                     }
-                                  }} 
-                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEditPlanning ? 'cursor-pointer hover:opacity-80' : ''} ${!a.isRemplacant && a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`} 
+                                  }}
+                                  className={`text-xs px-2 py-1.5 rounded-lg text-white mb-1 ${canEditPlanning ? 'cursor-pointer hover:opacity-80' : ''} ${!a.isRemplacant && a.id === currentUser?.id ? 'ring-2 ring-yellow-400' : ''}`}
                                   style={{ backgroundColor: a.color }}
                                   title={a.isRemplacant && a.titulaireRemplace ? `${a.name} remplace ${a.titulaireRemplace}` : a.name}
                                 >
@@ -2396,9 +2435,9 @@ const AnesthesistScheduler = () => {
                                 </div>
                               ))}
                               {canEditPlanning && (
-                                <select 
-                                  className="w-full text-xs p-1.5 border rounded-lg mt-1" 
-                                  value="" 
+                                <select
+                                  className="w-full text-xs p-1.5 border rounded-lg mt-1"
+                                  value=""
                                   onChange={(e) => {
                                     if (!e.target.value) return;
                                     if (e.target.value.startsWith('r_')) {
@@ -2432,7 +2471,7 @@ const AnesthesistScheduler = () => {
                               )}
                             </div>
                           ))}
-                          
+
                           {/* Affichage des IADES si activé */}
                           {showIadesInPlanning && !isWE && !isHol && (
                             <div className="mt-2 pt-2 border-t border-dashed" style={{ borderColor: theme.gray[300] }}>
@@ -2441,8 +2480,8 @@ const AnesthesistScheduler = () => {
                                 <span className="text-xs font-medium" style={{ color: '#059669' }}>IADES</span>
                               </div>
                               {getAssignedIades(d, 'bloc').map(iade => (
-                                <div 
-                                  key={iade.id} 
+                                <div
+                                  key={iade.id}
                                   className="text-xs px-2 py-1 rounded-lg text-white mb-1"
                                   style={{ backgroundColor: iade.color }}
                                 >
@@ -2510,11 +2549,11 @@ const AnesthesistScheduler = () => {
                       const monthDate = new Date(currentMonth.getFullYear(), monthIndex, 1);
                       const monthName = monthDate.toLocaleDateString('fr-FR', { month: 'long' });
                       const daysInMonth = new Date(currentMonth.getFullYear(), monthIndex + 1, 0).getDate();
-                      
+
                       // Calculer les stats du mois
                       let totalAssignments = 0;
                       let weCount = 0;
-                      
+
                       for (let day = 1; day <= daysInMonth; day++) {
                         const d = new Date(currentMonth.getFullYear(), monthIndex, day);
                         const dateKey = formatDateKey(d);
@@ -2526,10 +2565,10 @@ const AnesthesistScheduler = () => {
                         }
                         if (isWeekend(d)) weCount++;
                       }
-                      
+
                       return (
-                        <div 
-                          key={monthIndex} 
+                        <div
+                          key={monthIndex}
                           className="border rounded-xl p-3 hover:bg-gray-50 cursor-pointer transition-all"
                           onClick={() => {
                             setCurrentMonth(monthDate);
@@ -2560,8 +2599,8 @@ const AnesthesistScheduler = () => {
                               const hasData = schedule[dateKey] && Object.keys(schedule[dateKey]).length > 0;
                               const isWE = isWeekend(d);
                               return (
-                                <div 
-                                  key={i} 
+                                <div
+                                  key={i}
                                   className={`w-2 h-2 rounded-sm ${hasData ? 'bg-blue-500' : isWE ? 'bg-gray-200' : 'bg-gray-100'}`}
                                   title={`${i + 1} ${monthName}`}
                                 />
@@ -2580,9 +2619,9 @@ const AnesthesistScheduler = () => {
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="font-medium text-sm" style={{ color: theme.gray[700] }}><Users className="w-4 h-4 inline mr-1" />Filtrer :</span>
                   {anesthesists.filter(a => isTitulaire(a)).map(a => (
-                    <button 
-                      key={a.id} 
-                      onClick={() => { 
+                    <button
+                      key={a.id}
+                      onClick={() => {
                         const titulaires = anesthesists.filter(x => isTitulaire(x));
                         const allSelected = selectedFilters.size === titulaires.length + 1;
                         if (allSelected) {
@@ -2606,8 +2645,8 @@ const AnesthesistScheduler = () => {
                     </button>
                   ))}
                   {/* Bouton Remplaçants */}
-                  <button 
-                    onClick={() => { 
+                  <button
+                    onClick={() => {
                       if (selectedFilters.has('remplacants')) {
                         const f = new Set(selectedFilters);
                         f.delete('remplacants');
@@ -2625,13 +2664,13 @@ const AnesthesistScheduler = () => {
                   </button>
                   <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isTitulaire(a)).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
-                  
+
                   {/* Séparateur et toggle IADES */}
                   <div className="border-l border-gray-300 h-6 mx-2"></div>
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={showIadesInPlanning} 
+                    <input
+                      type="checkbox"
+                      checked={showIadesInPlanning}
                       onChange={(e) => setShowIadesInPlanning(e.target.checked)}
                       className="w-4 h-4 rounded"
                     />
@@ -2723,8 +2762,8 @@ const AnesthesistScheduler = () => {
                           <td className="px-4 py-3 text-center text-sm font-bold">{stat.total}</td>
                           <td className="px-4 py-3 text-center">
                             <span className={`px-2 py-1 rounded text-sm font-medium ${
-                              stat.joursRemplaces > 5 ? 'bg-red-100 text-red-700' : 
-                              stat.joursRemplaces > 2 ? 'bg-yellow-100 text-yellow-700' : 
+                              stat.joursRemplaces > 5 ? 'bg-red-100 text-red-700' :
+                              stat.joursRemplaces > 2 ? 'bg-yellow-100 text-yellow-700' :
                               'bg-gray-100 text-gray-600'
                             }`}>
                               {stat.joursRemplaces} j
@@ -2763,6 +2802,7 @@ const AnesthesistScheduler = () => {
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Blocs</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Consult.</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Astreintes</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Bloc+Astr.</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>WE</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Fériés</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Total jours</th>
@@ -2780,6 +2820,7 @@ const AnesthesistScheduler = () => {
                           <td className="px-4 py-3 text-center text-sm">{stat.bloc}</td>
                           <td className="px-4 py-3 text-center text-sm">{stat.consultation}</td>
                           <td className="px-4 py-3 text-center text-sm">{stat.astreinte}</td>
+                          <td className="px-4 py-3 text-center text-sm" style={{ color: stat.blocAstreinte > 0 ? theme.accent : 'inherit' }}>{stat.blocAstreinte}</td>
                           <td className="px-4 py-3 text-center text-sm">{stat.we}</td>
                           <td className="px-4 py-3 text-center text-sm">{stat.ferie}</td>
                           <td className="px-4 py-3 text-center text-sm font-bold">{stat.total}</td>
@@ -2787,7 +2828,7 @@ const AnesthesistScheduler = () => {
                       ))}
                       {calculateFullStats(statsPeriod.start || null, statsPeriod.end || null).filter(stat => !stat.isTitulaire && stat.total > 0).length === 0 && (
                         <tr>
-                          <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>
+                          <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>
                             Aucun remplaçant n'a encore travaillé
                           </td>
                         </tr>
@@ -2869,8 +2910,8 @@ const AnesthesistScheduler = () => {
                           <div
                             key={idx}
                             className={`p-4 rounded-xl border-l-4 ${
-                              inc.severity === 'error' 
-                                ? 'bg-red-50 border-red-500' 
+                              inc.severity === 'error'
+                                ? 'bg-red-50 border-red-500'
                                 : 'bg-yellow-50 border-yellow-500'
                             }`}
                           >
@@ -2909,16 +2950,16 @@ const AnesthesistScheduler = () => {
               <div className="flex justify-between mb-6">
                 <p style={{ color: theme.gray[500] }}>Liste des médecins remplaçants de la clinique</p>
                 {canEditPlanning && (
-                  <button 
+                  <button
                     onClick={() => setEditingRemplacant({ name: '', email: '', phone: '', specialite: '', notes: '' })}
-                    className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                    className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2"
                     style={{ backgroundColor: theme.primary }}
                   >
                     <UserPlus className="w-4 h-4" /> Ajouter
                   </button>
                 )}
               </div>
-              
+
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 {remplacants.length === 0 ? (
                   <p style={{ color: theme.gray[500] }}>Aucun remplaçant enregistré</p>
@@ -3074,15 +3115,15 @@ const AnesthesistScheduler = () => {
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-bold">Gestion des médecins</h3>
-                    <button 
+                    <button
                       onClick={() => setEditingAnesth({ name: '', email: '', phone: '', role: 'user', etp: 0.5, is_iade_admin: false })}
-                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2"
                       style={{ backgroundColor: theme.primary }}
                     >
                       <UserPlus className="w-4 h-4" /> Ajouter
                     </button>
                   </div>
-                  
+
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -3159,15 +3200,15 @@ const AnesthesistScheduler = () => {
                         Ces comptes peuvent uniquement consulter le planning, sans possibilité de modification.
                       </p>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setEditingAnesth({ name: '', email: '', phone: '', role: 'viewer', etp: 0 })}
-                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2"
                       style={{ backgroundColor: theme.gray[600] }}
                     >
                       <UserPlus className="w-4 h-4" /> Ajouter
                     </button>
                   </div>
-                  
+
                   {anesthesists.filter(a => a.role === 'viewer').length > 0 ? (
                     <div className="overflow-x-auto bg-white rounded-xl">
                       <table className="w-full">
@@ -3222,8 +3263,8 @@ const AnesthesistScheduler = () => {
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                   <h3 className="font-bold mb-4">Transférer le rôle admin</h3>
                   <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Attention : cette action est irréversible.</p>
-                  <select 
-                    className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-xl" 
+                  <select
+                    className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-xl"
                     onChange={(e) => e.target.value && transferAdmin(parseInt(e.target.value))}
                     defaultValue=""
                   >
@@ -3243,15 +3284,15 @@ const AnesthesistScheduler = () => {
                       <h3 className="font-bold">Gestion des IADEs</h3>
                       <p className="text-sm" style={{ color: theme.gray[500] }}>Gérer l'accès des IADEs à l'outil</p>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setEditingIade({ name: '', email: '', phone: '', is_titulaire: true, actif: true, role: 'iade' })}
-                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2" 
+                      className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2"
                       style={{ backgroundColor: '#059669' }}
                     >
                       <UserPlus className="w-4 h-4" /> Ajouter IADE
                     </button>
                   </div>
-                  
+
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -3343,11 +3384,11 @@ const AnesthesistScheduler = () => {
                   { key: 'notify_exchange_board', label: 'Nouvelle annonce sur la bourse' },
                 ].map(({ key, label }) => (
                   <label key={key} className="flex items-center gap-3 mb-3 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={emailPreferences[key] || false} 
-                      onChange={(e) => updateEmailPreferences({ ...emailPreferences, [key]: e.target.checked })} 
-                      className="w-5 h-5 rounded" 
+                    <input
+                      type="checkbox"
+                      checked={emailPreferences[key] || false}
+                      onChange={(e) => updateEmailPreferences({ ...emailPreferences, [key]: e.target.checked })}
+                      className="w-5 h-5 rounded"
                     />
                     <span>{label}</span>
                   </label>
@@ -3427,7 +3468,7 @@ const AnesthesistScheduler = () => {
                     );
                   })}
                 </div>
-                
+
                 {/* Une seule ligne pour les journées bloc */}
                 <div className="grid grid-cols-7">
                   {[0, 1, 2, 3, 4, 5, 6].map(i => {
@@ -3437,7 +3478,7 @@ const AnesthesistScheduler = () => {
                     const isWE = isWeekend(d);
                     const isHol = isHoliday(d);
                     const isClosed = isWE || isHol; // Bloc fermé WE et fériés
-                    
+
                     return (
                       <div key={i} className="p-3 border-r last:border-r-0 min-h-[150px]" style={{ backgroundColor: isClosed ? theme.gray[100] : 'white' }}>
                         {isClosed ? (
@@ -3655,7 +3696,7 @@ const AnesthesistScheduler = () => {
                     const date = form.date.value;
                     const heures = parseFloat(form.heures.value);
                     const commentaire = form.commentaire.value;
-                    
+
                     if (iadeId && date && heures) {
                       await saveIadeHeures(iadeId, date, heures, commentaire);
                       form.reset();
@@ -3832,7 +3873,7 @@ const AnesthesistScheduler = () => {
               <p className="text-sm mb-6" style={{ color: theme.gray[600] }}>
                 Règles appliquées : semaines complètes avec rotation des postes, équilibrage WE/fériés, celui d'astreinte vendredi = astreinte WE.
               </p>
-              
+
               <div className="space-y-4">
                 {/* Option 1: Nouveau planning intégral */}
                 <button
@@ -3848,7 +3889,7 @@ const AnesthesistScheduler = () => {
                     </div>
                   </div>
                 </button>
-                
+
                 {/* Option 2: Plage de dates */}
                 <div className="p-4 rounded-xl border-2">
                   <div className="flex items-center gap-3 mb-4">
@@ -3858,12 +3899,12 @@ const AnesthesistScheduler = () => {
                       <p className="text-sm" style={{ color: theme.gray[500] }}>Régénère uniquement la période sélectionnée (équilibre basé sur l'historique)</p>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">Date début</label>
-                      <input 
-                        type="date" 
+                      <input
+                        type="date"
                         id="genStartDate"
                         min={formatDateKey(new Date())}
                         max={formatDateKey(new Date(new Date().setMonth(new Date().getMonth() + 18)))}
@@ -3873,8 +3914,8 @@ const AnesthesistScheduler = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">Date fin</label>
-                      <input 
-                        type="date" 
+                      <input
+                        type="date"
                         id="genEndDate"
                         min={formatDateKey(new Date())}
                         max={formatDateKey(new Date(new Date().setMonth(new Date().getMonth() + 18)))}
@@ -3883,7 +3924,7 @@ const AnesthesistScheduler = () => {
                       />
                     </div>
                   </div>
-                  
+
                   <button
                     onClick={() => {
                       const startInput = document.getElementById('genStartDate');
@@ -3969,7 +4010,7 @@ const AnesthesistScheduler = () => {
 
       {/* MODAL ETP */}
       {showETPModal && (
-        <ETPModal 
+        <ETPModal
           anesthesists={anesthesists.filter(a => a.role !== 'viewer')}
           onClose={() => setShowETPModal(false)}
           onSave={async (newETPs) => {
