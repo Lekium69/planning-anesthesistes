@@ -1084,13 +1084,25 @@ const AnesthesistScheduler = () => {
         });
       }
 
-      // Supprimer les entrées dans la plage
-      const { error: delErr } = await supabase
+      // Supprimer les entrées avant de régénérer
+      // - Mode 'new' (18 mois): supprimer TOUT le futur pour éviter les orphelins
+      // - Mode 'range': supprimer uniquement la plage spécifiée
+      let deleteQuery = supabase
         .from('schedule')
         .delete()
-        .gte('date', formatDateKey(startDate))
-        .lte('date', formatDateKey(endDate));
+        .is('remplacant_name', null); // Ne pas supprimer les remplaçants manuels
 
+      if (mode === 'new') {
+        // Supprimer tout à partir de startDate (évite les entrées fantômes)
+        deleteQuery = deleteQuery.gte('date', formatDateKey(startDate));
+      } else {
+        // Mode range: supprimer uniquement la plage
+        deleteQuery = deleteQuery
+          .gte('date', formatDateKey(startDate))
+          .lte('date', formatDateKey(endDate));
+      }
+
+      const { error: delErr } = await deleteQuery;
       if (delErr) console.error('Erreur delete:', delErr);
 
       // Jours fériés
@@ -2341,11 +2353,20 @@ const AnesthesistScheduler = () => {
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <button onClick={() => { setCurrentWeekStart(getMonday(new Date())); setCurrentMonth(new Date()); }} className="px-4 py-2 rounded-xl text-sm" style={{ backgroundColor: theme.gray[100] }}>Aujourd'hui</button>
-                  <span className="font-bold min-w-[200px] text-center">
-                    {viewMode === 'week'
-                      ? `Semaine ${getWeekNumber(currentWeekStart)} - ${currentWeekStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
-                      : currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                  </span>
+                  
+                  {viewMode === 'week' ? (
+                    <div className="flex items-center gap-3 min-w-[280px] justify-center">
+                      <span className="text-sm" style={{ color: theme.gray[500] }}>Semaine {getWeekNumber(currentWeekStart)}</span>
+                      <span className="px-4 py-2 rounded-xl font-bold text-lg text-white" style={{ backgroundColor: theme.primary }}>
+                        {currentWeekStart.toLocaleDateString('fr-FR', { month: 'long' }).toUpperCase()} {currentWeekStart.getFullYear()}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="font-bold min-w-[200px] text-center">
+                      {currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                    </span>
+                  )}
+
                   <button onClick={() => {
                     if (viewMode === 'week') {
                       const newDate = new Date(currentWeekStart);
