@@ -927,12 +927,30 @@ const AnesthesistScheduler = () => {
           if (!scheduleIadesMap[item.date][item.shift]) scheduleIadesMap[item.date][item.shift] = [];
 
           if (item.iade_id) {
-            scheduleIadesMap[item.date][item.shift].push({ type: 'titulaire', id: item.iade_id, scheduleId: item.id });
+            scheduleIadesMap[item.date][item.shift].push({ 
+              type: 'titulaire', 
+              id: item.iade_id, 
+              scheduleId: item.id,
+              heure_debut: item.heure_debut,
+              heure_fin: item.heure_fin,
+              plage_id: item.plage_id
+            });
+          } else if (item.interimaire_id) {
+            scheduleIadesMap[item.date][item.shift].push({
+              type: 'interimaire',
+              id: item.interimaire_id,
+              scheduleId: item.id,
+              heure_debut: item.heure_debut,
+              heure_fin: item.heure_fin,
+              plage_id: item.plage_id
+            });
           } else if (item.remplacant_name) {
             scheduleIadesMap[item.date][item.shift].push({
               type: 'remplacant',
               name: item.remplacant_name,
-              scheduleId: item.id
+              scheduleId: item.id,
+              heure_debut: item.heure_debut,
+              heure_fin: item.heure_fin
             });
           }
         });
@@ -1632,7 +1650,30 @@ const AnesthesistScheduler = () => {
       if (entry.type === 'titulaire') {
         const iade = iades.find(i => i.id === entry.id);
         if (iade && selectedIadesFilters.has(iade.id)) {
-          return { ...iade, isRemplacant: false, scheduleId: entry.scheduleId };
+          return { 
+            ...iade, 
+            isRemplacant: false, 
+            isInterimaire: false,
+            scheduleId: entry.scheduleId,
+            heure_debut: entry.heure_debut,
+            heure_fin: entry.heure_fin,
+            plage_id: entry.plage_id
+          };
+        }
+      } else if (entry.type === 'interimaire') {
+        const interimaire = iadesInterimaires.find(i => i.id === entry.id);
+        if (interimaire) {
+          return {
+            id: `int_${entry.scheduleId}`,
+            name: interimaire.name,
+            color: '#f59e0b', // Orange pour intérimaires
+            isRemplacant: false,
+            isInterimaire: true,
+            scheduleId: entry.scheduleId,
+            heure_debut: entry.heure_debut,
+            heure_fin: entry.heure_fin,
+            plage_id: entry.plage_id
+          };
         }
       } else if (entry.type === 'remplacant') {
         return {
@@ -1640,7 +1681,10 @@ const AnesthesistScheduler = () => {
           name: entry.name,
           color: '#6b7280',
           isRemplacant: true,
-          scheduleId: entry.scheduleId
+          isInterimaire: false,
+          scheduleId: entry.scheduleId,
+          heure_debut: entry.heure_debut,
+          heure_fin: entry.heure_fin
         };
       }
       return null;
@@ -3727,9 +3771,12 @@ const AnesthesistScheduler = () => {
                   <ChevronLeft className="w-5 h-5" />
                 </button>
                 <button onClick={() => setCurrentWeekStart(getMonday(new Date()))} className="px-4 py-2 rounded-xl hover:bg-gray-100 text-sm">Aujourd'hui</button>
-                <h2 className="text-lg font-semibold" style={{ color: theme.gray[800] }}>
-                  Semaine {getWeekNumber(currentWeekStart)} - {currentWeekStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                </h2>
+                <div className="flex items-center gap-3 min-w-[280px] justify-center">
+                  <span className="text-sm" style={{ color: theme.gray[500] }}>Semaine {getWeekNumber(currentWeekStart)}</span>
+                  <span className="px-4 py-2 rounded-xl font-bold text-lg text-white" style={{ backgroundColor: '#059669' }}>
+                    {currentWeekStart.toLocaleDateString('fr-FR', { month: 'long' }).toUpperCase()} {currentWeekStart.getFullYear()}
+                  </span>
+                </div>
                 <button onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100">
                   <ChevronRight className="w-5 h-5" />
                 </button>
@@ -3753,6 +3800,9 @@ const AnesthesistScheduler = () => {
                     {iade.name}
                   </button>
                 ))}
+                {iadesInterimaires.filter(i => i.actif).length > 0 && (
+                  <span className="text-xs px-2 py-1 rounded bg-orange-100 text-orange-700">+ {iadesInterimaires.filter(i => i.actif).length} intérim.</span>
+                )}
                 <button onClick={() => setSelectedIadesFilters(new Set(iades.map(i => i.id)))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                 <button onClick={() => setSelectedIadesFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
               </div>
@@ -3784,7 +3834,7 @@ const AnesthesistScheduler = () => {
                     const isClosed = isWE || isHol; // Bloc fermé WE et fériés
 
                     return (
-                      <div key={i} className="p-3 border-r last:border-r-0 min-h-[150px]" style={{ backgroundColor: isClosed ? theme.gray[100] : 'white' }}>
+                      <div key={i} className="p-3 border-r last:border-r-0 min-h-[180px]" style={{ backgroundColor: isClosed ? theme.gray[100] : 'white' }}>
                         {isClosed ? (
                           <div className="flex flex-col items-center justify-center h-full text-center">
                             <span className="text-2xl mb-2">🚫</span>
@@ -3800,34 +3850,45 @@ const AnesthesistScheduler = () => {
                             </div>
                             <div className="space-y-2">
                               {assigned.map(iade => (
-                                <div key={iade.id} className="flex items-center gap-1 group">
-                                  <span className="px-3 py-1.5 rounded-lg text-sm text-white truncate flex-1 font-medium" style={{ backgroundColor: iade.color }}>
-                                    {iade.isRemplacant ? '🔄 ' : ''}{iade.name}
-                                  </span>
-                                  {canEditIadePlanning && (
-                                    <button onClick={() => removeIadeAssignment(iade.scheduleId)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-100">
-                                      <X className="w-4 h-4 text-red-500" />
-                                    </button>
-                                  )}
+                                <div key={iade.id} className="group relative">
+                                  <div className="flex items-center gap-1">
+                                    <div className="px-2 py-1.5 rounded-lg text-sm text-white truncate flex-1 font-medium" style={{ backgroundColor: iade.color }}>
+                                      <div className="flex items-center justify-between">
+                                        <span className="truncate">{iade.isRemplacant ? '🔄 ' : ''}{iade.name}</span>
+                                        {canEditIadePlanning && (
+                                          <button onClick={() => removeIadeAssignment(iade.scheduleId)} className="opacity-0 group-hover:opacity-100 ml-1 p-0.5 rounded hover:bg-white/20">
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        )}
+                                      </div>
+                                      {iade.heure_debut && iade.heure_fin && (
+                                        <div className="text-xs mt-0.5 opacity-90">
+                                          🕐 {iade.heure_debut?.slice(0,5)} - {iade.heure_fin?.slice(0,5)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
                               ))}
                               {canEditIadePlanning && (
-                                <select
-                                  className="w-full text-sm p-2 border rounded-lg mt-2"
-                                  style={{ borderColor: theme.gray[300] }}
-                                  value=""
-                                  onChange={(e) => {
-                                    if (e.target.value) {
-                                      assignIade(d, 'bloc', parseInt(e.target.value));
-                                      e.target.value = '';
-                                    }
-                                  }}
+                                <button
+                                  onClick={() => setShowPlanningModal({ date: d, assigned })}
+                                  className="w-full text-sm p-2 border-2 border-dashed rounded-lg mt-2 flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
+                                  style={{ borderColor: theme.gray[300], color: theme.gray[500] }}
                                 >
-                                  <option value="">+ Ajouter IADE</option>
-                                  {iades.filter(iade => iade.actif && !assigned.some(a => a.id === iade.id)).map(iade => (
-                                    <option key={iade.id} value={iade.id}>{iade.name}</option>
-                                  ))}
-                                </select>
+                                  <Plus className="w-4 h-4" />
+                                  Ajouter IADE
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
                               )}
                             </div>
                           </>
@@ -4863,6 +4924,160 @@ const AnesthesistScheduler = () => {
               </label>
               <button type="submit" className="w-full py-2 text-white rounded-xl font-medium" style={{ backgroundColor: theme.accent }}>
                 {editingInterimaire.id ? 'Enregistrer' : 'Créer'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PLANIFICATION IADE */}
+      {showPlanningModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="p-6 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold">Planifier un IADE</h2>
+                <p className="text-sm" style={{ color: theme.gray[500] }}>
+                  {showPlanningModal.date?.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+              <button onClick={() => setShowPlanningModal(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.target;
+              const typePersonnel = form.type_personnel.value;
+              const selectedId = parseInt(form.personnel_id.value);
+              const plageId = form.plage_id?.value ? parseInt(form.plage_id.value) : null;
+              
+              let heureDebut = form.heure_debut.value;
+              let heureFin = form.heure_fin.value;
+              
+              // Si une plage est sélectionnée, utiliser ses horaires
+              if (plageId) {
+                const plage = iadesPlagesFavorites.find(p => p.id === plageId);
+                if (plage) {
+                  heureDebut = plage.heure_debut;
+                  heureFin = plage.heure_fin;
+                }
+              }
+              
+              if (!selectedId || !heureDebut || !heureFin) {
+                alert('Veuillez remplir tous les champs');
+                return;
+              }
+              
+              await assignIadeWithHoraires(
+                showPlanningModal.date, 
+                selectedId, 
+                heureDebut, 
+                heureFin, 
+                plageId,
+                typePersonnel === 'interimaire'
+              );
+              setShowPlanningModal(null);
+            }} className="p-6 space-y-4">
+              
+              {/* Type de personnel */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Type de personnel</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="type_personnel" value="titulaire" defaultChecked onChange={(e) => {
+                      document.getElementById('select_personnel').innerHTML = '<option value="">Sélectionner...</option>' + 
+                        iades.filter(i => i.actif && !showPlanningModal.assigned?.some(a => a.id === i.id)).map(i => 
+                          `<option value="${i.id}">${i.name}</option>`
+                        ).join('');
+                    }} />
+                    <span className="text-sm">IADE Titulaire</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="type_personnel" value="interimaire" onChange={(e) => {
+                      document.getElementById('select_personnel').innerHTML = '<option value="">Sélectionner...</option>' + 
+                        iadesInterimaires.filter(i => i.actif).map(i => 
+                          `<option value="${i.id}">${i.name} (${i.agence || 'Intérim'})</option>`
+                        ).join('');
+                    }} />
+                    <span className="text-sm">Intérimaire</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Sélection de la personne */}
+              <div>
+                <label className="block text-sm font-medium mb-1">IADE</label>
+                <select id="select_personnel" name="personnel_id" required className="w-full px-4 py-2 border rounded-xl">
+                  <option value="">Sélectionner...</option>
+                  {iades.filter(i => i.actif && !showPlanningModal.assigned?.some(a => a.id === i.id)).map(i => (
+                    <option key={i.id} value={i.id}>{i.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Choix des horaires */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Horaires</label>
+                
+                {/* Plages favorites */}
+                {iadesPlagesFavorites.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs mb-2" style={{ color: theme.gray[500] }}>Plages favorites :</p>
+                    <div className="flex flex-wrap gap-2">
+                      {iadesPlagesFavorites.map(plage => (
+                        <button
+                          key={plage.id}
+                          type="button"
+                          onClick={() => {
+                            document.querySelector('input[name="plage_id"]').value = plage.id;
+                            document.querySelector('input[name="heure_debut"]').value = plage.heure_debut;
+                            document.querySelector('input[name="heure_fin"]').value = plage.heure_fin;
+                            // Mettre à jour le style du bouton sélectionné
+                            document.querySelectorAll('.plage-btn').forEach(btn => btn.classList.remove('ring-2', 'ring-offset-2'));
+                            document.getElementById(`plage-${plage.id}`).classList.add('ring-2', 'ring-offset-2');
+                          }}
+                          id={`plage-${plage.id}`}
+                          className="plage-btn px-3 py-2 rounded-lg text-sm font-medium text-white transition-all"
+                          style={{ backgroundColor: plage.couleur, ringColor: plage.couleur }}
+                        >
+                          {plage.nom}
+                          <span className="block text-xs opacity-80">{plage.heure_debut?.slice(0,5)} - {plage.heure_fin?.slice(0,5)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Entrée manuelle */}
+                <div className="p-3 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                  <p className="text-xs mb-2" style={{ color: theme.gray[500] }}>Ou saisie manuelle :</p>
+                  <input type="hidden" name="plage_id" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs mb-1" style={{ color: theme.gray[600] }}>Début</label>
+                      <input 
+                        type="time" 
+                        name="heure_debut" 
+                        required 
+                        onChange={() => document.querySelector('input[name="plage_id"]').value = ''}
+                        className="w-full px-3 py-2 border rounded-lg text-sm" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs mb-1" style={{ color: theme.gray[600] }}>Fin</label>
+                      <input 
+                        type="time" 
+                        name="heure_fin" 
+                        required 
+                        onChange={() => document.querySelector('input[name="plage_id"]').value = ''}
+                        className="w-full px-3 py-2 border rounded-lg text-sm" 
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" className="w-full py-3 text-white rounded-xl font-medium" style={{ backgroundColor: theme.primary }}>
+                Ajouter au planning
               </button>
             </form>
           </div>
