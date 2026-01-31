@@ -728,6 +728,17 @@ const AnesthesistScheduler = () => {
   const [showIadesInPlanning, setShowIadesInPlanning] = useState(true);
   const [iadesHeures, setIadesHeures] = useState([]);
   const [currentIade, setCurrentIade] = useState(null);
+  
+  // IADES V2 - Nouvelles fonctionnalités
+  const [iadesPlagesFavorites, setIadesPlagesFavorites] = useState([]);
+  const [iadesInterimaires, setIadesInterimaires] = useState([]);
+  const [iadesConges, setIadesConges] = useState([]);
+  const [iadesPointages, setIadesPointages] = useState([]);
+  const [editingPlage, setEditingPlage] = useState(null);
+  const [editingInterimaire, setEditingInterimaire] = useState(null);
+  const [editingConge, setEditingConge] = useState(null);
+  const [editingPointage, setEditingPointage] = useState(null);
+  const [showPlanningModal, setShowPlanningModal] = useState(null); // {date, iade, horaires}
 
   // Modals
   const [editingRemplacant, setEditingRemplacant] = useState(null);
@@ -930,6 +941,24 @@ const AnesthesistScheduler = () => {
 
       // Charger les heures IADES
       if (heuresData.data) setIadesHeures(heuresData.data);
+
+      // Charger les nouvelles données IADES V2
+      try {
+        const [plagesData, interimairesData, congesData, pointagesData] = await Promise.all([
+          supabase.from('iades_plages_favorites').select('*').eq('actif', true).order('ordre'),
+          supabase.from('iades_interimaires').select('*').order('name'),
+          supabase.from('iades_conges').select('*'),
+          supabase.from('iades_pointages').select('*'),
+        ]);
+        
+        if (plagesData.data) setIadesPlagesFavorites(plagesData.data);
+        if (interimairesData.data) setIadesInterimaires(interimairesData.data);
+        if (congesData.data) setIadesConges(congesData.data);
+        if (pointagesData.data) setIadesPointages(pointagesData.data);
+      } catch (e) {
+        // Tables peut-être pas encore créées
+        console.log('Tables IADES V2 non disponibles:', e.message);
+      }
 
       if (hol.data) setHolidays(hol.data);
       if (notif.data) setNotifications(notif.data);
@@ -1689,6 +1718,224 @@ const AnesthesistScheduler = () => {
   };
 
   // ============================================
+  // FONCTIONS IADES V2
+  // ============================================
+  
+  // --- Plages horaires favorites ---
+  const savePlage = async (plageData) => {
+    if (!canManageIades) return;
+    if (plageData.id) {
+      const { error } = await supabase.from('iades_plages_favorites').update(plageData).eq('id', plageData.id);
+      if (!error) await loadData();
+      return error;
+    } else {
+      const { error } = await supabase.from('iades_plages_favorites').insert(plageData);
+      if (!error) await loadData();
+      return error;
+    }
+  };
+
+  const deletePlage = async (id) => {
+    if (!canManageIades) return;
+    await supabase.from('iades_plages_favorites').delete().eq('id', id);
+    await loadData();
+  };
+
+  // --- Intérimaires ---
+  const saveInterimaire = async (data) => {
+    if (!canManageIades) return;
+    if (data.id) {
+      const { error } = await supabase.from('iades_interimaires').update(data).eq('id', data.id);
+      if (!error) await loadData();
+      return error;
+    } else {
+      const { error } = await supabase.from('iades_interimaires').insert(data);
+      if (!error) await loadData();
+      return error;
+    }
+  };
+
+  const deleteInterimaire = async (id) => {
+    if (!canManageIades) return;
+    if (!confirm('Supprimer cet intérimaire ?')) return;
+    await supabase.from('iades_interimaires').delete().eq('id', id);
+    await loadData();
+  };
+
+  // --- Congés ---
+  const getAnneeCp = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    // Si entre janvier et mai, l'année CP a commencé l'année précédente
+    if (month < 6) {
+      return `${year - 1}-${year}`;
+    }
+    return `${year}-${year + 1}`;
+  };
+
+  const saveConge = async (congeData) => {
+    if (!canManageIades && !isIade) return;
+    
+    // Calculer le nombre de jours
+    const start = new Date(congeData.date_debut);
+    const end = new Date(congeData.date_fin);
+    const diffTime = Math.abs(end - start);
+    const nbJours = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    const data = {
+      ...congeData,
+      nb_jours: nbJours,
+      annee_cp: getAnneeCp(congeData.date_debut),
+      statut: canManageIades ? 'valide' : 'en_attente'
+    };
+    
+    if (congeData.id) {
+      const { error } = await supabase.from('iades_conges').update(data).eq('id', congeData.id);
+      if (!error) await loadData();
+      return error;
+    } else {
+      const { error } = await supabase.from('iades_conges').insert(data);
+      if (!error) await loadData();
+      return error;
+    }
+  };
+
+  const deleteConge = async (id) => {
+    if (!canManageIades) return;
+    if (!confirm('Supprimer ce congé ?')) return;
+    await supabase.from('iades_conges').delete().eq('id', id);
+    await loadData();
+  };
+
+  const validerConge = async (id, statut) => {
+    if (!canManageIades) return;
+    await supabase.from('iades_conges').update({ 
+      statut, 
+      validated_at: new Date().toISOString(),
+      validated_by: currentUser?.id 
+    }).eq('id', id);
+    await loadData();
+  };
+
+  // --- Pointages ---
+  const savePointage = async (pointageData) => {
+    const dateKey = formatDateKey(pointageData.date);
+    
+    // Vérifier si un pointage existe déjà pour ce jour
+    const existing = iadesPointages.find(p => 
+      (p.iade_id === pointageData.iade_id || p.interimaire_id === pointageData.interimaire_id) && 
+      p.date === dateKey
+    );
+    
+    const data = {
+      ...pointageData,
+      date: dateKey,
+      updated_at: new Date().toISOString()
+    };
+    
+    if (existing) {
+      const { error } = await supabase.from('iades_pointages').update(data).eq('id', existing.id);
+      if (!error) await loadData();
+      return error;
+    } else {
+      const { error } = await supabase.from('iades_pointages').insert(data);
+      if (!error) await loadData();
+      return error;
+    }
+  };
+
+  const deletePointage = async (id) => {
+    await supabase.from('iades_pointages').delete().eq('id', id);
+    await loadData();
+  };
+
+  // --- Assignation IADE avec horaires ---
+  const assignIadeWithHoraires = async (date, iadeId, heureDebut, heureFin, plageId = null, isInterimaire = false) => {
+    if (!canEditIadePlanning) return;
+    const dateKey = formatDateKey(date);
+    const year = new Date(date).getFullYear();
+
+    const insertData = {
+      date: dateKey,
+      shift: 'bloc',
+      year,
+      iade_id: isInterimaire ? null : iadeId,
+      interimaire_id: isInterimaire ? iadeId : null,
+      heure_debut: heureDebut,
+      heure_fin: heureFin,
+      plage_id: plageId
+    };
+
+    const { error } = await supabase.from('schedule_iades').insert(insertData);
+    if (!error) await loadData();
+    return error;
+  };
+
+  // --- Calculs stats IADES V2 ---
+  const calculateIadesStatsV2 = (iadeId, anneeCp = null) => {
+    const currentAnneeCp = anneeCp || getAnneeCp(new Date());
+    const [startYear] = currentAnneeCp.split('-').map(Number);
+    const periodeStart = `${startYear}-06-01`;
+    const periodeEnd = `${startYear + 1}-05-31`;
+    
+    // Heures planifiées passées
+    let heuresPlanifieesPast = 0;
+    let heuresPlanifieesFuture = 0;
+    const today = formatDateKey(new Date());
+    
+    Object.entries(scheduleIades).forEach(([dateKey, shifts]) => {
+      if (dateKey < periodeStart || dateKey > periodeEnd) return;
+      
+      Object.values(shifts).forEach(entries => {
+        entries.forEach(entry => {
+          if (entry.id === iadeId && entry.heure_debut && entry.heure_fin) {
+            const [hd, md] = entry.heure_debut.split(':').map(Number);
+            const [hf, mf] = entry.heure_fin.split(':').map(Number);
+            const heures = (hf + mf/60) - (hd + md/60);
+            
+            if (dateKey <= today) {
+              heuresPlanifieesPast += heures;
+            } else {
+              heuresPlanifieesFuture += heures;
+            }
+          }
+        });
+      });
+    });
+    
+    // CP pris
+    const cpPris = iadesConges
+      .filter(c => c.iade_id === iadeId && c.annee_cp === currentAnneeCp && c.statut === 'valide' && c.type === 'cp')
+      .reduce((sum, c) => sum + (c.nb_jours || 0), 0);
+    
+    const iade = iades.find(i => i.id === iadeId);
+    const cpAnnuels = iade?.cp_annuels || 25;
+    
+    // Heures pointées
+    const heuresPointees = iadesPointages
+      .filter(p => p.iade_id === iadeId && p.date >= periodeStart && p.date <= periodeEnd)
+      .reduce((sum, p) => {
+        if (p.heure_entree && p.heure_sortie) {
+          const [he, me] = p.heure_entree.split(':').map(Number);
+          const [hs, ms] = p.heure_sortie.split(':').map(Number);
+          const heures = (hs + ms/60) - (he + me/60) - (p.pause_minutes || 0) / 60;
+          return sum + Math.max(0, heures);
+        }
+        return sum;
+      }, 0);
+    
+    return {
+      heuresPlanifieesPast: Math.round(heuresPlanifieesPast * 10) / 10,
+      heuresPlanifieesFuture: Math.round(heuresPlanifieesFuture * 10) / 10,
+      cpPris,
+      cpRestants: cpAnnuels - cpPris,
+      heuresPointees: Math.round(heuresPointees * 10) / 10,
+      heuresSup: Math.round((heuresPointees - heuresPlanifieesPast) * 10) / 10
+    };
+  };
+
+  // ============================================
   // DÉTECTION DES INCOHÉRENCES
   // ============================================
   const getIncoherences = () => {
@@ -2162,26 +2409,51 @@ const AnesthesistScheduler = () => {
                   <Users className="w-4 h-4" />
                   <span>Équipe</span>
                 </button>
+                <button
+                  onClick={() => setCurrentView('iades-interimaires')}
+                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
+                    currentView === 'iades-interimaires' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                  }`}
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Intérimaires</span>
+                </button>
+                <button
+                  onClick={() => setCurrentView('iades-pointage')}
+                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
+                    currentView === 'iades-pointage' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                  }`}
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>Pointage</span>
+                </button>
+                <button
+                  onClick={() => setCurrentView('iades-conges')}
+                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
+                    currentView === 'iades-conges' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                  }`}
+                >
+                  <CalendarOff className="w-4 h-4" />
+                  <span>Congés</span>
+                </button>
+                <button
+                  onClick={() => setCurrentView('iades-stats')}
+                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
+                    currentView === 'iades-stats' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>Récap / Stats</span>
+                </button>
                 {canManageIades && (
                   <button
-                    onClick={() => setCurrentView('iades-heures')}
+                    onClick={() => setCurrentView('iades-admin')}
                     className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
-                      currentView === 'iades-heures' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
+                      currentView === 'iades-admin' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                     }`}
                   >
-                    <Clock className="w-4 h-4" />
-                    <span>Saisie heures</span>
-                  </button>
-                )}
-                {canManageIades && (
-                  <button
-                    onClick={() => setCurrentView('iades-stats')}
-                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
-                      currentView === 'iades-stats' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
-                    }`}
-                  >
-                    <BarChart3 className="w-4 h-4" />
-                    <span>Statistiques</span>
+                    <Settings className="w-4 h-4" />
+                    <span>Paramètres</span>
                   </button>
                 )}
               </div>
@@ -2216,7 +2488,11 @@ const AnesthesistScheduler = () => {
             {currentView === 'remplacants' && 'Liste des remplaçants'}
             {currentView === 'iades-planning' && 'Planning IADES'}
             {currentView === 'iades-list' && 'Équipe IADES'}
-            {currentView === 'iades-stats' && 'Statistiques IADES'}
+            {currentView === 'iades-interimaires' && 'IADES Intérimaires'}
+            {currentView === 'iades-pointage' && 'Pointage IADES'}
+            {currentView === 'iades-conges' && 'Congés IADES'}
+            {currentView === 'iades-stats' && 'Récapitulatif IADES'}
+            {currentView === 'iades-admin' && 'Paramètres IADES'}
             {currentView === 'iades-heures' && 'Saisie des heures IADES'}
             {currentView === 'exchange' && 'Bourse aux échanges'}
             {currentView === 'unavailabilities' && 'Mes indisponibilités'}
@@ -3887,6 +4163,441 @@ const AnesthesistScheduler = () => {
               </div>
             </div>
           )}
+
+          {/* VUE INTÉRIMAIRES IADES */}
+          {currentView === 'iades-interimaires' && (
+            <div className="w-full">
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.warning }}>
+                      <UserPlus className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold" style={{ color: theme.gray[800] }}>IADES Intérimaires</h3>
+                      <p className="text-sm" style={{ color: theme.gray[500] }}>Personnel intérimaire pour missions ponctuelles</p>
+                    </div>
+                  </div>
+                  {canManageIades && (
+                    <button
+                      onClick={() => setEditingInterimaire({ actif: true })}
+                      className="flex items-center gap-2 px-4 py-2 text-white rounded-xl"
+                      style={{ backgroundColor: theme.accent }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Ajouter
+                    </button>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Agence</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Téléphone</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Email</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Actif</th>
+                        {canManageIades && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {iadesInterimaires.map(inter => (
+                        <tr key={inter.id} className="border-b hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium">{inter.name}</td>
+                          <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{inter.agence || '-'}</td>
+                          <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{inter.phone || '-'}</td>
+                          <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{inter.email || '-'}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded text-xs ${inter.actif ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {inter.actif ? 'Oui' : 'Non'}
+                            </span>
+                          </td>
+                          {canManageIades && (
+                            <td className="px-4 py-3 text-right">
+                              <button onClick={() => setEditingInterimaire(inter)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
+                                <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
+                              </button>
+                              <button onClick={() => deleteInterimaire(inter.id)} className="p-1.5 rounded hover:bg-red-100">
+                                <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                      {iadesInterimaires.length === 0 && (
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucun intérimaire enregistré</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VUE POINTAGE IADES */}
+          {currentView === 'iades-pointage' && (
+            <div className="w-full">
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.accent }}>
+                    <Clock className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold" style={{ color: theme.gray[800] }}>Pointage du jour</h3>
+                    <p className="text-sm" style={{ color: theme.gray[500] }}>Enregistrez vos horaires d'entrée et de sortie</p>
+                  </div>
+                </div>
+
+                {/* Formulaire de pointage */}
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const form = e.target;
+                  const iadeId = isIade ? currentIade?.id : parseInt(form.iade_id.value);
+                  if (!iadeId) return alert('Sélectionnez un IADE');
+                  
+                  await savePointage({
+                    iade_id: iadeId,
+                    date: form.date.value,
+                    heure_entree: form.heure_entree.value || null,
+                    heure_sortie: form.heure_sortie.value || null,
+                    pause_minutes: parseInt(form.pause_minutes.value) || 0,
+                    commentaire: form.commentaire.value
+                  });
+                  form.reset();
+                }} className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                  {!isIade && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1">IADE</label>
+                      <select name="iade_id" className="w-full px-3 py-2 border rounded-xl" required>
+                        <option value="">Sélectionner</option>
+                        {iades.filter(i => i.actif).map(i => (
+                          <option key={i.id} value={i.id}>{i.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Date</label>
+                    <input type="date" name="date" defaultValue={formatDateKey(new Date())} className="w-full px-3 py-2 border rounded-xl" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Entrée</label>
+                    <input type="time" name="heure_entree" className="w-full px-3 py-2 border rounded-xl" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Sortie</label>
+                    <input type="time" name="heure_sortie" className="w-full px-3 py-2 border rounded-xl" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Pause (min)</label>
+                    <input type="number" name="pause_minutes" defaultValue="0" min="0" className="w-full px-3 py-2 border rounded-xl" />
+                  </div>
+                  <div className="flex items-end">
+                    <button type="submit" className="w-full px-4 py-2 text-white rounded-xl" style={{ backgroundColor: theme.primary }}>
+                      Enregistrer
+                    </button>
+                  </div>
+                  <div className="md:col-span-6">
+                    <label className="block text-sm font-medium mb-1">Commentaire</label>
+                    <input type="text" name="commentaire" placeholder="Optionnel" className="w-full px-3 py-2 border rounded-xl" />
+                  </div>
+                </form>
+              </div>
+
+              {/* Liste des pointages récents */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="font-bold mb-4" style={{ color: theme.gray[800] }}>Pointages récents</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Date</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>IADE</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Entrée</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Sortie</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Pause</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Total</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Commentaire</th>
+                        {canManageIades && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {iadesPointages
+                        .filter(p => isIade ? p.iade_id === currentIade?.id : true)
+                        .sort((a, b) => b.date.localeCompare(a.date))
+                        .slice(0, 30)
+                        .map(p => {
+                          const iade = iades.find(i => i.id === p.iade_id);
+                          let totalHeures = '-';
+                          if (p.heure_entree && p.heure_sortie) {
+                            const [he, me] = p.heure_entree.split(':').map(Number);
+                            const [hs, ms] = p.heure_sortie.split(':').map(Number);
+                            const heures = (hs + ms/60) - (he + me/60) - (p.pause_minutes || 0) / 60;
+                            totalHeures = `${Math.floor(heures)}h${Math.round((heures % 1) * 60).toString().padStart(2, '0')}`;
+                          }
+                          return (
+                            <tr key={p.id} className="border-b hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium">{new Date(p.date).toLocaleDateString('fr-FR')}</td>
+                              <td className="px-4 py-3 text-sm">{iade?.name || '-'}</td>
+                              <td className="px-4 py-3 text-center text-sm">{p.heure_entree || '-'}</td>
+                              <td className="px-4 py-3 text-center text-sm">{p.heure_sortie || '-'}</td>
+                              <td className="px-4 py-3 text-center text-sm">{p.pause_minutes || 0} min</td>
+                              <td className="px-4 py-3 text-center text-sm font-bold">{totalHeures}</td>
+                              <td className="px-4 py-3 text-sm" style={{ color: theme.gray[500] }}>{p.commentaire || '-'}</td>
+                              {canManageIades && (
+                                <td className="px-4 py-3 text-right">
+                                  <button onClick={() => deletePointage(p.id)} className="p-1.5 rounded hover:bg-red-100">
+                                    <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      {iadesPointages.length === 0 && (
+                        <tr><td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucun pointage enregistré</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VUE CONGÉS IADES */}
+          {currentView === 'iades-conges' && (
+            <div className="w-full">
+              {/* Résumé CP par IADE */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#7c3aed' }}>
+                    <CalendarOff className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold" style={{ color: theme.gray[800] }}>Solde de congés</h3>
+                    <p className="text-sm" style={{ color: theme.gray[500] }}>Année CP : {getAnneeCp(new Date())} (juin à mai)</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {iades.filter(i => i.actif && i.is_titulaire).map(iade => {
+                    const cpPris = iadesConges
+                      .filter(c => c.iade_id === iade.id && c.annee_cp === getAnneeCp(new Date()) && c.statut === 'valide' && c.type === 'cp')
+                      .reduce((sum, c) => sum + (c.nb_jours || 0), 0);
+                    const cpRestants = (iade.cp_annuels || 25) - cpPris;
+                    return (
+                      <div key={iade.id} className="p-4 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: iade.color }} />
+                          <span className="font-medium text-sm">{iade.name}</span>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-2xl font-bold" style={{ color: cpRestants < 5 ? theme.danger : theme.success }}>{cpRestants}</span>
+                          <span className="text-sm" style={{ color: theme.gray[500] }}>/ {iade.cp_annuels || 25} CP restants</span>
+                        </div>
+                        <div className="text-xs mt-1" style={{ color: theme.gray[400] }}>{cpPris} jours pris</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Formulaire nouveau congé */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <h3 className="font-bold mb-4" style={{ color: theme.gray[800] }}>Nouveau congé</h3>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const form = e.target;
+                  const iadeId = isIade ? currentIade?.id : parseInt(form.iade_id.value);
+                  if (!iadeId) return alert('Sélectionnez un IADE');
+                  
+                  await saveConge({
+                    iade_id: iadeId,
+                    date_debut: form.date_debut.value,
+                    date_fin: form.date_fin.value,
+                    type: form.type.value,
+                    commentaire: form.commentaire.value
+                  });
+                  form.reset();
+                }} className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  {!isIade && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1">IADE</label>
+                      <select name="iade_id" className="w-full px-3 py-2 border rounded-xl" required>
+                        <option value="">Sélectionner</option>
+                        {iades.filter(i => i.actif && i.is_titulaire).map(i => (
+                          <option key={i.id} value={i.id}>{i.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Du</label>
+                    <input type="date" name="date_debut" className="w-full px-3 py-2 border rounded-xl" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Au</label>
+                    <input type="date" name="date_fin" className="w-full px-3 py-2 border rounded-xl" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Type</label>
+                    <select name="type" className="w-full px-3 py-2 border rounded-xl">
+                      <option value="cp">CP</option>
+                      <option value="maladie">Maladie</option>
+                      <option value="autre">Autre</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button type="submit" className="w-full px-4 py-2 text-white rounded-xl" style={{ backgroundColor: theme.primary }}>
+                      Enregistrer
+                    </button>
+                  </div>
+                  <div className="md:col-span-5">
+                    <label className="block text-sm font-medium mb-1">Commentaire</label>
+                    <input type="text" name="commentaire" placeholder="Optionnel" className="w-full px-3 py-2 border rounded-xl" />
+                  </div>
+                </form>
+              </div>
+
+              {/* Liste des congés */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="font-bold mb-4" style={{ color: theme.gray[800] }}>Congés enregistrés</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>IADE</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Période</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Jours</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Type</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Statut</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Commentaire</th>
+                        {canManageIades && <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {iadesConges
+                        .filter(c => isIade ? c.iade_id === currentIade?.id : true)
+                        .sort((a, b) => b.date_debut.localeCompare(a.date_debut))
+                        .map(c => {
+                          const iade = iades.find(i => i.id === c.iade_id);
+                          return (
+                            <tr key={c.id} className="border-b hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium">{iade?.name || '-'}</td>
+                              <td className="px-4 py-3 text-sm">
+                                {new Date(c.date_debut).toLocaleDateString('fr-FR')} → {new Date(c.date_fin).toLocaleDateString('fr-FR')}
+                              </td>
+                              <td className="px-4 py-3 text-center font-bold">{c.nb_jours}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-1 rounded text-xs ${c.type === 'cp' ? 'bg-blue-100 text-blue-700' : c.type === 'maladie' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                                  {c.type === 'cp' ? 'CP' : c.type === 'maladie' ? 'Maladie' : 'Autre'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-1 rounded text-xs ${c.statut === 'valide' ? 'bg-green-100 text-green-700' : c.statut === 'refuse' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                  {c.statut === 'valide' ? '✓ Validé' : c.statut === 'refuse' ? '✗ Refusé' : '⏳ En attente'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm" style={{ color: theme.gray[500] }}>{c.commentaire || '-'}</td>
+                              {canManageIades && (
+                                <td className="px-4 py-3 text-right">
+                                  {c.statut === 'en_attente' && (
+                                    <>
+                                      <button onClick={() => validerConge(c.id, 'valide')} className="p-1.5 rounded hover:bg-green-100 mr-1">
+                                        <Check className="w-4 h-4 text-green-600" />
+                                      </button>
+                                      <button onClick={() => validerConge(c.id, 'refuse')} className="p-1.5 rounded hover:bg-red-100 mr-1">
+                                        <X className="w-4 h-4 text-red-600" />
+                                      </button>
+                                    </>
+                                  )}
+                                  <button onClick={() => deleteConge(c.id)} className="p-1.5 rounded hover:bg-red-100">
+                                    <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      {iadesConges.length === 0 && (
+                        <tr><td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucun congé enregistré</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VUE ADMIN IADES - Plages horaires */}
+          {currentView === 'iades-admin' && canManageIades && (
+            <div className="w-full">
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.primary }}>
+                      <Settings className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold" style={{ color: theme.gray[800] }}>Plages horaires favorites</h3>
+                      <p className="text-sm" style={{ color: theme.gray[500] }}>Créneaux réutilisables pour la planification</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setEditingPlage({ actif: true, ordre: iadesPlagesFavorites.length + 1 })}
+                    className="flex items-center gap-2 px-4 py-2 text-white rounded-xl"
+                    style={{ backgroundColor: theme.accent }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Ajouter
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                        <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Nom</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Début</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Fin</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Durée</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Couleur</th>
+                        <th className="px-4 py-3 text-right text-sm font-semibold" style={{ color: theme.gray[600] }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {iadesPlagesFavorites.map(plage => {
+                        const [hd, md] = plage.heure_debut.split(':').map(Number);
+                        const [hf, mf] = plage.heure_fin.split(':').map(Number);
+                        const duree = (hf + mf/60) - (hd + md/60);
+                        return (
+                          <tr key={plage.id} className="border-b hover:bg-gray-50">
+                            <td className="px-4 py-3 font-medium">{plage.nom}</td>
+                            <td className="px-4 py-3 text-center text-sm">{plage.heure_debut}</td>
+                            <td className="px-4 py-3 text-center text-sm">{plage.heure_fin}</td>
+                            <td className="px-4 py-3 text-center text-sm font-bold">{Math.floor(duree)}h{Math.round((duree % 1) * 60).toString().padStart(2, '0')}</td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="w-6 h-6 rounded mx-auto" style={{ backgroundColor: plage.couleur }} />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button onClick={() => setEditingPlage(plage)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
+                                <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
+                              </button>
+                              <button onClick={() => deletePlage(plage.id)} className="p-1.5 rounded hover:bg-red-100">
+                                <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {iadesPlagesFavorites.length === 0 && (
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: theme.gray[500] }}>Aucune plage horaire définie</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
       {/* MODAL GÉNÉRATION */}
@@ -3997,7 +4708,8 @@ const AnesthesistScheduler = () => {
                 phone: form.phone.value,
                 email: form.email.value,
                 is_titulaire: form.is_titulaire.checked,
-                actif: form.actif.checked
+                actif: form.actif.checked,
+                cp_annuels: parseInt(form.cp_annuels?.value) || 25
               };
               if (editingIade.id) {
                 await updateIade(editingIade.id, data);
@@ -4018,6 +4730,10 @@ const AnesthesistScheduler = () => {
                 <label className="block text-sm font-medium mb-1">Email</label>
                 <input name="email" type="email" defaultValue={editingIade.email || ''} className="w-full px-4 py-2 border rounded-xl" />
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">CP annuels</label>
+                <input name="cp_annuels" type="number" min="0" max="50" defaultValue={editingIade.cp_annuels || 25} className="w-full px-4 py-2 border rounded-xl" />
+              </div>
               <div className="flex gap-6">
                 <label className="flex items-center gap-2">
                   <input name="is_titulaire" type="checkbox" defaultChecked={editingIade.is_titulaire} />
@@ -4030,6 +4746,123 @@ const AnesthesistScheduler = () => {
               </div>
               <button type="submit" className="w-full py-2 text-white rounded-xl font-medium" style={{ backgroundColor: theme.accent }}>
                 {editingIade.id ? 'Enregistrer' : 'Créer'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITION PLAGE HORAIRE */}
+      {editingPlage && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">{editingPlage.id ? 'Modifier plage' : 'Nouvelle plage horaire'}</h2>
+              <button onClick={() => setEditingPlage(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.target;
+              const data = {
+                nom: form.nom.value,
+                heure_debut: form.heure_debut.value,
+                heure_fin: form.heure_fin.value,
+                couleur: form.couleur.value,
+                ordre: parseInt(form.ordre.value) || 0,
+                actif: true
+              };
+              if (editingPlage.id) data.id = editingPlage.id;
+              await savePlage(data);
+              setEditingPlage(null);
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Nom de la plage</label>
+                <input name="nom" defaultValue={editingPlage.nom || ''} required placeholder="Ex: Journée complète" className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Heure début</label>
+                  <input name="heure_debut" type="time" defaultValue={editingPlage.heure_debut || '07:30'} required className="w-full px-4 py-2 border rounded-xl" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Heure fin</label>
+                  <input name="heure_fin" type="time" defaultValue={editingPlage.heure_fin || '18:30'} required className="w-full px-4 py-2 border rounded-xl" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Couleur</label>
+                  <input name="couleur" type="color" defaultValue={editingPlage.couleur || '#3b82f6'} className="w-full h-10 border rounded-xl cursor-pointer" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Ordre d'affichage</label>
+                  <input name="ordre" type="number" min="0" defaultValue={editingPlage.ordre || 0} className="w-full px-4 py-2 border rounded-xl" />
+                </div>
+              </div>
+              <button type="submit" className="w-full py-2 text-white rounded-xl font-medium" style={{ backgroundColor: theme.accent }}>
+                {editingPlage.id ? 'Enregistrer' : 'Créer'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITION INTERIMAIRE */}
+      {editingInterimaire && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">{editingInterimaire.id ? 'Modifier intérimaire' : 'Nouvel intérimaire'}</h2>
+              <button onClick={() => setEditingInterimaire(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.target;
+              const data = {
+                name: form.name.value,
+                phone: form.phone.value,
+                email: form.email.value,
+                agence: form.agence.value,
+                specialite: form.specialite.value,
+                notes: form.notes.value,
+                actif: form.actif.checked
+              };
+              if (editingInterimaire.id) data.id = editingInterimaire.id;
+              await saveInterimaire(data);
+              setEditingInterimaire(null);
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Nom complet</label>
+                <input name="name" defaultValue={editingInterimaire.name || ''} required className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Agence d'intérim</label>
+                <input name="agence" defaultValue={editingInterimaire.agence || ''} placeholder="Ex: Appel Médical" className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Téléphone</label>
+                  <input name="phone" defaultValue={editingInterimaire.phone || ''} className="w-full px-4 py-2 border rounded-xl" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Email</label>
+                  <input name="email" type="email" defaultValue={editingInterimaire.email || ''} className="w-full px-4 py-2 border rounded-xl" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Spécialité</label>
+                <input name="specialite" defaultValue={editingInterimaire.specialite || ''} className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Notes</label>
+                <textarea name="notes" defaultValue={editingInterimaire.notes || ''} rows={2} className="w-full px-4 py-2 border rounded-xl" />
+              </div>
+              <label className="flex items-center gap-2">
+                <input name="actif" type="checkbox" defaultChecked={editingInterimaire.actif !== false} />
+                <span className="text-sm">Actif</span>
+              </label>
+              <button type="submit" className="w-full py-2 text-white rounded-xl font-medium" style={{ backgroundColor: theme.accent }}>
+                {editingInterimaire.id ? 'Enregistrer' : 'Créer'}
               </button>
             </form>
           </div>
