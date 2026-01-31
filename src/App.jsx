@@ -3889,16 +3889,6 @@ const AnesthesistScheduler = () => {
                 </div>
               </div>
             </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
           )}
 
           {/* LISTE IADES */}
