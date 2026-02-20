@@ -718,6 +718,12 @@ const AnesthesistScheduler = () => {
   const [unavailabilities, setUnavailabilities] = useState([]);
   const [emailPreferences, setEmailPreferences] = useState({});
 
+  // Notification email system
+  const [supportEmails, setSupportEmails] = useState([]);
+  const [notificationSettings, setNotificationSettings] = useState({});
+  const [notificationLogs, setNotificationLogs] = useState([]);
+  const [editingSupportEmail, setEditingSupportEmail] = useState(null);
+
   // IADES
   const [iades, setIades] = useState([]);
   const [scheduleIades, setScheduleIades] = useState({});
@@ -861,6 +867,25 @@ const AnesthesistScheduler = () => {
           }
           const { data: prefs } = await supabase.from('email_preferences').select('*').eq('anesthesist_id', profile.id).single();
           if (prefs) setEmailPreferences(prefs);
+        }
+
+        // Charger les données de notification (admin seulement)
+        try {
+          const [supportEmailsData, settingsData, logsData] = await Promise.all([
+            supabase.from('support_emails').select('*').order('name'),
+            supabase.from('notification_settings').select('*'),
+            supabase.from('notification_email_log').select('*').order('created_at', { ascending: false }).limit(100),
+          ]);
+          
+          if (supportEmailsData.data) setSupportEmails(supportEmailsData.data);
+          if (settingsData.data) {
+            const settingsMap = {};
+            settingsData.data.forEach(s => { settingsMap[s.key] = s.value; });
+            setNotificationSettings(settingsMap);
+          }
+          if (logsData.data) setNotificationLogs(logsData.data);
+        } catch (e) {
+          console.log('Tables notifications non disponibles:', e.message);
         }
 
         // Ne réinitialiser les filtres qu'au premier chargement (seulement titulaires ETP >= 0.2)
@@ -2258,6 +2283,111 @@ const AnesthesistScheduler = () => {
   const updateEmailPreferences = async (prefs) => {
     await supabase.from('email_preferences').update(prefs).eq('anesthesist_id', currentUser.id);
     setEmailPreferences(prefs);
+  };
+
+  // ============================================
+  // GESTION DES NOTIFICATIONS EMAIL
+  // ============================================
+  const saveSupportEmail = async (emailData) => {
+    if (!isAdmin) return;
+    
+    if (emailData.id) {
+      const { error } = await supabase.from('support_emails').update({
+        name: emailData.name,
+        email: emailData.email,
+        description: emailData.description,
+        notify_replacements: emailData.notify_replacements,
+        notify_planning_generation: emailData.notify_planning_generation,
+        notify_exchanges: emailData.notify_exchanges,
+        email_enabled: emailData.email_enabled
+      }).eq('id', emailData.id);
+      if (error) { alert('Erreur: ' + error.message); return; }
+    } else {
+      const { error } = await supabase.from('support_emails').insert(emailData);
+      if (error) { alert('Erreur: ' + error.message); return; }
+    }
+    
+    setEditingSupportEmail(null);
+    await loadData();
+  };
+
+  const deleteSupportEmail = async (id) => {
+    if (!isAdmin) return;
+    if (!confirm('Supprimer cet email de support ?')) return;
+    
+    await supabase.from('support_emails').delete().eq('id', id);
+    await loadData();
+  };
+
+  const updateNotificationSetting = async (key, value) => {
+    if (!isAdmin) return;
+    
+    await supabase.from('notification_settings').update({ 
+      value: value,
+      updated_by: currentUser?.id 
+    }).eq('key', key);
+    
+    setNotificationSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Fonction pour envoyer une notification email
+  const sendNotificationEmail = async (type, recipientId, data, sendToSupport = false) => {
+    // Vérifier si le système est activé
+    if (notificationSettings.email_system_enabled !== true && notificationSettings.email_system_enabled !== 'true') {
+      console.log('Email system disabled');
+      return { success: false, message: 'Email system disabled' };
+    }
+
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        },
+        body: JSON.stringify({
+          type,
+          recipientId,
+          data: {
+            ...data,
+            appUrl: window.location.origin
+          },
+          sendToSupport
+        })
+      });
+
+      const result = await response.json();
+      console.log('Notification result:', result);
+      return result;
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  // Helpers pour les notifications spécifiques
+  const notifyPlanningChange = async (anesthesistId, changeData) => {
+    const anesthesist = anesthesists.find(a => a.id === anesthesistId);
+    if (!anesthesist) return;
+
+    return sendNotificationEmail('planning_change', anesthesistId, {
+      recipientName: anesthesist.name,
+      date: changeData.date,
+      changeDescription: changeData.description,
+      previousValue: changeData.previousValue,
+      newValue: changeData.newValue,
+      modifiedBy: currentUser?.name
+    });
+  };
+
+  const notifyReplacementAssigned = async (replacementData) => {
+    return sendNotificationEmail('replacement_assigned', null, {
+      date: replacementData.date,
+      replacementName: replacementData.replacementName,
+      shift: replacementData.shift,
+      replacedPerson: replacementData.replacedPerson,
+      assignedBy: currentUser?.name
+    }, true);
   };
 
   // ============================================
@@ -3695,6 +3825,250 @@ const AnesthesistScheduler = () => {
                 </div>
               )}
 
+              {/* Section Notifications Email - Admin seulement */}
+              {canManageAnesthesists && (
+                <>
+                  {/* Configuration globale des notifications */}
+                  <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold flex items-center gap-2">
+                          <Bell className="w-5 h-5" />
+                          Notifications par email
+                        </h3>
+                        <p className="text-sm" style={{ color: theme.gray[500] }}>
+                          Configuration globale du système de notifications
+                        </p>
+                      </div>
+                      
+                      {/* Master switch */}
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium">Système activé</span>
+                        <button
+                          onClick={() => updateNotificationSetting('email_system_enabled', 
+                            !(notificationSettings.email_system_enabled === true || notificationSettings.email_system_enabled === 'true')
+                          )}
+                          className={`relative w-14 h-7 rounded-full transition-colors ${
+                            notificationSettings.email_system_enabled === true || notificationSettings.email_system_enabled === 'true' 
+                              ? 'bg-green-500' : 'bg-gray-300'
+                          }`}
+                        >
+                          <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                            notificationSettings.email_system_enabled === true || notificationSettings.email_system_enabled === 'true' 
+                              ? 'left-8' : 'left-1'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {!(notificationSettings.email_system_enabled === true || notificationSettings.email_system_enabled === 'true') && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4">
+                        <p className="text-sm text-yellow-800">
+                          ⚠️ Le système de notifications par email est actuellement <strong>désactivé</strong>. 
+                          Aucun email ne sera envoyé tant qu'il n'est pas activé.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="p-4 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                        <h4 className="font-medium mb-2">📧 Adresse d'expédition</h4>
+                        <input
+                          type="text"
+                          value={notificationSettings.from_email || ''}
+                          onChange={(e) => updateNotificationSetting('from_email', e.target.value)}
+                          placeholder="Planning <noreply@exemple.com>"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                        />
+                        <p className="text-xs mt-1" style={{ color: theme.gray[400] }}>
+                          Format: Nom &lt;email@domaine.com&gt;
+                        </p>
+                      </div>
+
+                      <div className="p-4 rounded-xl" style={{ backgroundColor: theme.gray[50] }}>
+                        <h4 className="font-medium mb-2">⏰ Rappel astreinte</h4>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={notificationSettings.astreinte_reminder_hours || 24}
+                            onChange={(e) => updateNotificationSetting('astreinte_reminder_hours', parseInt(e.target.value))}
+                            min="1"
+                            max="72"
+                            className="w-20 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                          />
+                          <span className="text-sm">heures avant</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Emails de support */}
+                  <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold">📬 Emails de support</h3>
+                        <p className="text-sm" style={{ color: theme.gray[500] }}>
+                          Administration, secrétariat et autres destinataires des notifications système
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        {/* Toggle support emails */}
+                        <div className="flex items-center gap-2 mr-4">
+                          <span className="text-sm">Activés</span>
+                          <button
+                            onClick={() => updateNotificationSetting('support_emails_enabled', 
+                              !(notificationSettings.support_emails_enabled === true || notificationSettings.support_emails_enabled === 'true')
+                            )}
+                            className={`relative w-12 h-6 rounded-full transition-colors ${
+                              notificationSettings.support_emails_enabled !== false ? 'bg-green-500' : 'bg-gray-300'
+                            }`}
+                          >
+                            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                              notificationSettings.support_emails_enabled !== false ? 'left-6' : 'left-0.5'
+                            }`} />
+                          </button>
+                        </div>
+                        
+                        <button
+                          onClick={() => setEditingSupportEmail({ name: '', email: '', description: '', notify_replacements: true, notify_planning_generation: true, notify_exchanges: true, email_enabled: true })}
+                          className="px-4 py-2 text-white rounded-xl font-medium flex items-center gap-2"
+                          style={{ backgroundColor: theme.primary }}
+                        >
+                          <Plus className="w-4 h-4" /> Ajouter
+                        </button>
+                      </div>
+                    </div>
+
+                    {notificationSettings.support_emails_enabled === false && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
+                        <p className="text-sm" style={{ color: theme.gray[600] }}>
+                          Les notifications vers les emails de support sont désactivées.
+                        </p>
+                      </div>
+                    )}
+
+                    {supportEmails.length === 0 ? (
+                      <div className="text-center py-8" style={{ color: theme.gray[400] }}>
+                        <Mail className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                        <p>Aucun email de support configuré</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {supportEmails.map(email => (
+                          <div 
+                            key={email.id} 
+                            className={`p-4 rounded-xl border ${email.email_enabled ? 'border-gray-200' : 'border-gray-100 opacity-60'}`}
+                            style={{ backgroundColor: theme.gray[50] }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-medium">{email.name}</h4>
+                                  {!email.email_enabled && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-500">Désactivé</span>
+                                  )}
+                                </div>
+                                <p className="text-sm" style={{ color: theme.gray[600] }}>{email.email}</p>
+                                {email.description && (
+                                  <p className="text-xs mt-1 italic" style={{ color: theme.gray[400] }}>{email.description}</p>
+                                )}
+                                <div className="flex gap-2 mt-2">
+                                  {email.notify_replacements && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-700">Remplaçants</span>
+                                  )}
+                                  {email.notify_planning_generation && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">Planning</span>
+                                  )}
+                                  {email.notify_exchanges && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Échanges</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setEditingSupportEmail(email)}
+                                  className="p-2 rounded-xl hover:bg-blue-50"
+                                  style={{ color: theme.accent }}
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => deleteSupportEmail(email.id)}
+                                  className="p-2 rounded-xl hover:bg-red-50"
+                                  style={{ color: theme.danger }}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Historique des notifications */}
+                  <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                    <h3 className="font-bold mb-4">📊 Historique des envois email</h3>
+                    
+                    {notificationLogs.length === 0 ? (
+                      <p className="text-center py-8" style={{ color: theme.gray[400] }}>
+                        Aucun email envoyé pour le moment
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                              <th className="px-3 py-2 text-left">Date</th>
+                              <th className="px-3 py-2 text-left">Destinataire</th>
+                              <th className="px-3 py-2 text-left">Type</th>
+                              <th className="px-3 py-2 text-left">Sujet</th>
+                              <th className="px-3 py-2 text-center">Statut</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {notificationLogs.slice(0, 20).map(log => (
+                              <tr key={log.id} className="border-b hover:bg-gray-50">
+                                <td className="px-3 py-2 text-xs" style={{ color: theme.gray[500] }}>
+                                  {new Date(log.created_at).toLocaleString('fr-FR')}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className="font-medium">{log.recipient_email}</span>
+                                  <br />
+                                  <span className="text-xs" style={{ color: theme.gray[400] }}>{log.recipient_type}</span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: theme.gray[100] }}>
+                                    {log.notification_type}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 max-w-[200px] truncate" title={log.subject}>
+                                  {log.subject}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <span className={`text-xs px-2 py-0.5 rounded ${
+                                    log.status === 'sent' ? 'bg-green-100 text-green-700' :
+                                    log.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                    log.status === 'disabled' ? 'bg-gray-100 text-gray-500' :
+                                    'bg-yellow-100 text-yellow-700'
+                                  }`}>
+                                    {log.status === 'sent' ? '✓ Envoyé' :
+                                     log.status === 'failed' ? '✗ Échec' :
+                                     log.status === 'disabled' ? '○ Désactivé' : '⏳ En attente'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h3 className="font-bold mb-4">Jours fériés {new Date().getFullYear()} / {new Date().getFullYear() + 1}</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -3724,23 +4098,56 @@ const AnesthesistScheduler = () => {
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h3 className="font-bold mb-4">Notifications par email</h3>
-                {[
-                  { key: 'notify_new_planning', label: 'Nouveau planning généré' },
-                  { key: 'notify_swap_request', label: "Demande d'échange reçue" },
-                  { key: 'notify_swap_response', label: 'Réponse à ma demande' },
-                  { key: 'notify_exchange_board', label: 'Nouvelle annonce sur la bourse' },
-                ].map(({ key, label }) => (
-                  <label key={key} className="flex items-center gap-3 mb-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={emailPreferences[key] || false}
-                      onChange={(e) => updateEmailPreferences({ ...emailPreferences, [key]: e.target.checked })}
-                      className="w-5 h-5 rounded"
-                    />
-                    <span>{label}</span>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold">🔔 Notifications par email</h3>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-sm">Activer les emails</span>
+                    <button
+                      onClick={() => updateEmailPreferences({ ...emailPreferences, email_enabled: !emailPreferences.email_enabled })}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${emailPreferences.email_enabled !== false ? 'bg-green-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${emailPreferences.email_enabled !== false ? 'left-6' : 'left-0.5'}`} />
+                    </button>
                   </label>
-                ))}
+                </div>
+
+                {emailPreferences.email_enabled === false && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
+                    <p className="text-sm" style={{ color: theme.gray[500] }}>
+                      ⚠️ Vous ne recevrez aucune notification par email.
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {[
+                    { key: 'notify_planning_change', label: '📅 Modification de mon planning', desc: 'Quand quelqu\'un modifie vos assignations' },
+                    { key: 'notify_swap_request', label: '🔄 Demande d\'échange reçue', desc: 'Quand un collègue vous propose un échange' },
+                    { key: 'notify_swap_response', label: '✓ Réponse à ma demande', desc: 'Quand on répond à votre demande d\'échange' },
+                    { key: 'notify_exchange_board', label: '📢 Nouvelle annonce bourse', desc: 'Quand une annonce est publiée sur la bourse' },
+                    { key: 'notify_astreinte_reminder', label: '⏰ Rappel d\'astreinte', desc: 'Rappel la veille de votre astreinte' },
+                    { key: 'notify_new_planning', label: '📊 Nouveau planning généré', desc: 'Quand l\'admin génère un nouveau planning' },
+                  ].map(({ key, label, desc }) => (
+                    <label 
+                      key={key} 
+                      className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
+                        emailPreferences.email_enabled !== false ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={emailPreferences[key] || false}
+                        onChange={(e) => updateEmailPreferences({ ...emailPreferences, [key]: e.target.checked })}
+                        disabled={emailPreferences.email_enabled === false}
+                        className="w-5 h-5 rounded mt-0.5"
+                      />
+                      <div>
+                        <span className="font-medium">{label}</span>
+                        <p className="text-xs" style={{ color: theme.gray[400] }}>{desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
@@ -5462,6 +5869,129 @@ const AnesthesistScheduler = () => {
                 Enregistrer
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ÉDITION EMAIL DE SUPPORT */}
+      {editingSupportEmail && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">
+                {editingSupportEmail.id ? 'Modifier' : 'Ajouter'} un email de support
+              </h2>
+              <button onClick={() => setEditingSupportEmail(null)} className="p-2 rounded-xl hover:bg-gray-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!editingSupportEmail.name || !editingSupportEmail.email) {
+                alert('Nom et email requis');
+                return;
+              }
+              saveSupportEmail(editingSupportEmail);
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Nom *</label>
+                <input
+                  type="text"
+                  value={editingSupportEmail.name}
+                  onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, name: e.target.value })}
+                  placeholder="Ex: Secrétariat"
+                  required
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Email *</label>
+                <input
+                  type="email"
+                  value={editingSupportEmail.email}
+                  onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, email: e.target.value })}
+                  placeholder="secretariat@clinique.fr"
+                  required
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Description</label>
+                <input
+                  type="text"
+                  value={editingSupportEmail.description || ''}
+                  onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, description: e.target.value })}
+                  placeholder="Ex: Boîte mail du secrétariat médical"
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl"
+                />
+              </div>
+
+              <div className="pt-2">
+                <label className="block text-sm font-medium mb-2">Notifications à recevoir</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingSupportEmail.notify_replacements}
+                      onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, notify_replacements: e.target.checked })}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-sm">🔄 Quand un remplaçant est assigné</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingSupportEmail.notify_planning_generation}
+                      onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, notify_planning_generation: e.target.checked })}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-sm">📊 Quand le planning est généré</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingSupportEmail.notify_exchanges}
+                      onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, notify_exchanges: e.target.checked })}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-sm">✓ Quand un échange est validé</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingSupportEmail.email_enabled}
+                    onChange={(e) => setEditingSupportEmail({ ...editingSupportEmail, email_enabled: e.target.checked })}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm font-medium">Activer les notifications pour cet email</span>
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingSupportEmail(null)}
+                  className="flex-1 py-3 rounded-xl font-medium border"
+                  style={{ borderColor: theme.gray[300], color: theme.gray[600] }}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 rounded-xl font-medium text-white"
+                  style={{ backgroundColor: theme.primary }}
+                >
+                  {editingSupportEmail.id ? 'Modifier' : 'Ajouter'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
