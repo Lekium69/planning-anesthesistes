@@ -2009,9 +2009,15 @@ const AnesthesistScheduler = () => {
   // ============================================
   const getIncoherences = () => {
     const incoherences = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     Object.entries(schedule).forEach(([dateStr, shifts]) => {
       const date = new Date(dateStr);
+      
+      // Ignorer les dates passées
+      if (date < today) return;
+      
       const isWE = isWeekend(date);
       const isHol = isHoliday(date);
 
@@ -2500,10 +2506,222 @@ const AnesthesistScheduler = () => {
     </div>;
   }
 
-  if (!user) return <LoginPage onLogin={setUser} />;
-
   const weekDays = getWeekDays(currentWeekStart);
   const stats = calculateStats();
+  
+  // Mode visiteur (non connecté) - accès lecture seule au planning
+  const isVisitor = !user;
+  
+  // Si visiteur, afficher uniquement le planning en lecture seule
+  if (isVisitor) {
+    return (
+      <div className="min-h-screen" style={{ backgroundColor: theme.gray[100] }}>
+        {/* Header visiteur */}
+        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: theme.primary }}>
+              <Calendar className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold" style={{ color: theme.gray[800] }}>Planning Anesthésistes</h1>
+              <p className="text-xs" style={{ color: theme.gray[500] }}>Consultation</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setUser({})} 
+            className="px-4 py-2 rounded-xl text-white font-medium flex items-center gap-2"
+            style={{ backgroundColor: theme.primary }}
+          >
+            <LogIn className="w-4 h-4" />
+            Se connecter
+          </button>
+        </header>
+
+        {/* Planning en lecture seule */}
+        <main className="p-8">
+          {/* Navigation */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex gap-2">
+                {['week', 'month'].map(m => (
+                  <button key={m} onClick={() => setViewMode(m)} className={`px-4 py-2 rounded-xl text-sm font-medium ${viewMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>
+                    {m === 'week' ? 'Semaine' : 'Mois'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-4">
+              <button onClick={() => {
+                if (viewMode === 'week') {
+                  const newDate = new Date(currentWeekStart);
+                  newDate.setDate(newDate.getDate() - 7);
+                  setCurrentWeekStart(newDate);
+                } else {
+                  const newDate = new Date(currentMonth);
+                  newDate.setMonth(newDate.getMonth() - 1);
+                  setCurrentMonth(newDate);
+                }
+              }} className="p-2 rounded-xl hover:bg-gray-100">
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <button onClick={() => { setCurrentWeekStart(getMonday(new Date())); setCurrentMonth(new Date()); }} className="px-4 py-2 rounded-xl text-sm" style={{ backgroundColor: theme.gray[100] }}>Aujourd'hui</button>
+              
+              {viewMode === 'week' ? (
+                <div className="flex items-center gap-3 min-w-[280px] justify-center">
+                  <span className="text-sm" style={{ color: theme.gray[500] }}>Semaine {getWeekNumber(currentWeekStart)}</span>
+                  <span className="px-4 py-2 rounded-xl font-bold text-lg text-white" style={{ backgroundColor: theme.primary }}>
+                    {currentWeekStart.toLocaleDateString('fr-FR', { month: 'long' }).toUpperCase()} {currentWeekStart.getFullYear()}
+                  </span>
+                </div>
+              ) : (
+                <span className="font-bold min-w-[200px] text-center">
+                  {currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                </span>
+              )}
+
+              <button onClick={() => {
+                if (viewMode === 'week') {
+                  const newDate = new Date(currentWeekStart);
+                  newDate.setDate(newDate.getDate() + 7);
+                  setCurrentWeekStart(newDate);
+                } else {
+                  const newDate = new Date(currentMonth);
+                  newDate.setMonth(newDate.getMonth() + 1);
+                  setCurrentMonth(newDate);
+                }
+              }} className="p-2 rounded-xl hover:bg-gray-100">
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Filtres */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-6">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium" style={{ color: theme.gray[600] }}>Filtrer :</span>
+              {anesthesists.filter(a => isTitulaire(a)).map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => {
+                    const newFilters = new Set(selectedFilters);
+                    if (newFilters.has(a.id)) newFilters.delete(a.id);
+                    else newFilters.add(a.id);
+                    setSelectedFilters(newFilters);
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selectedFilters.has(a.id) ? 'text-white' : ''}`}
+                  style={selectedFilters.has(a.id) ? { backgroundColor: a.color, borderColor: a.color } : { borderColor: theme.gray[200], color: theme.gray[400] }}
+                >
+                  Dr {a.name.split(' ')[1]}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  const newFilters = new Set(selectedFilters);
+                  if (newFilters.has('remplacants')) newFilters.delete('remplacants');
+                  else newFilters.add('remplacants');
+                  setSelectedFilters(newFilters);
+                }}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selectedFilters.has('remplacants') ? 'bg-gray-600 text-white border-gray-600' : 'border-gray-200 text-gray-400'}`}
+              >
+                🔄 Remplaçants
+              </button>
+              <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isTitulaire(a)).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+              <button onClick={() => { setSelectedFilters(new Set()); filtersInitialized.current = true; }} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
+            </div>
+          </div>
+
+          {/* Vue Semaine (visiteur) */}
+          {viewMode === 'week' && (
+            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+              <div className="grid grid-cols-7 border-b">
+                {weekDays.map((d, i) => {
+                  const isToday = d.toDateString() === new Date().toDateString();
+                  const isWE = isWeekend(d);
+                  const isHol = isHoliday(d);
+                  return (
+                    <div key={i} className={`p-4 text-center border-r last:border-r-0 ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''}`}>
+                      <p className="text-xs font-medium uppercase" style={{ color: theme.gray[500] }}>{d.toLocaleDateString('fr-FR', { weekday: 'short' })}</p>
+                      <p className={`text-xl font-bold mt-1 ${isToday ? 'bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center mx-auto' : ''}`}>{d.getDate()}</p>
+                      {isHol && <p className="text-xs mt-1 truncate" style={{ color: theme.warning }}><Star className="w-3 h-3 inline" /> {getHolidayName(d)}</p>}
+                      {isWE && !isHol && <p className="text-xs mt-1" style={{ color: theme.gray[400] }}>Week-end</p>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-7">
+                {weekDays.map((d, i) => {
+                  const isWE = isWeekend(d);
+                  const isHol = isHoliday(d);
+                  const shifts = getShiftsForDay(d);
+                  return (
+                    <div key={i} className={`p-3 border-r last:border-r-0 min-h-[250px] ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''}`}>
+                      {shifts.map(shift => (
+                        <div key={shift} className="mb-3">
+                          <div className="flex items-center gap-1 mb-1">
+                            <ShiftIcon shift={shift} className="w-3 h-3" style={{ color: theme.gray[400] }} />
+                            <span className="text-xs font-medium" style={{ color: theme.gray[500] }}>{getShiftLabel(shift)}</span>
+                          </div>
+                          {getAssigned(d, shift).map(a => (
+                            <div
+                              key={a.id}
+                              className="text-xs px-2 py-1.5 rounded-lg text-white mb-1"
+                              style={{ backgroundColor: a.color }}
+                              title={a.isRemplacant && a.titulaireRemplace ? `${a.name} remplace ${a.titulaireRemplace}` : a.name}
+                            >
+                              {a.isRemplacant ? (
+                                <>🔄 {a.name.split(' ')[1] || a.name.split(' ')[0]}</>
+                              ) : (
+                                <>Dr {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}</>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Vue Mois (visiteur) */}
+          {viewMode === 'month' && (
+            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+              <div className="grid grid-cols-7 border-b" style={{ backgroundColor: theme.gray[50] }}>
+                {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(d => (
+                  <div key={d} className="p-3 text-center text-sm font-medium border-r last:border-r-0" style={{ color: theme.gray[600] }}>{d}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7">
+                {getDaysInMonth(currentMonth).map((d, i) => {
+                  if (!d) return <div key={i} className="p-2 border-r border-b last:border-r-0" style={{ backgroundColor: theme.gray[50] }} />;
+                  const isToday = d.toDateString() === new Date().toDateString();
+                  const isWE = isWeekend(d);
+                  const isHol = isHoliday(d);
+                  const shifts = getShiftsForDay(d);
+                  return (
+                    <div key={i} className={`p-2 border-r border-b last:border-r-0 min-h-[100px] ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''}`}>
+                      <div className={`text-sm font-medium mb-1 ${isToday ? 'bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center' : ''}`} style={{ color: isToday ? undefined : theme.gray[700] }}>
+                        {d.getDate()}
+                      </div>
+                      {shifts.map(shift => (
+                        getAssigned(d, shift).slice(0, 2).map(a => (
+                          <div key={`${shift}-${a.id}`} className="text-xs px-1 py-0.5 rounded text-white mb-0.5 truncate" style={{ backgroundColor: a.color }}>
+                            {a.isRemplacant ? '🔄' : ''}{a.name.split(' ')[1]?.substring(0, 4) || a.name.substring(0, 4)}
+                          </div>
+                        ))
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
   // ============================================
   // RENDER
   // ============================================
@@ -2756,9 +2974,9 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
-                    {['week', 'month', 'year'].map(m => (
+                    {['week', 'month'].map(m => (
                       <button key={m} onClick={() => setViewMode(m)} className={`px-4 py-2 rounded-xl text-sm font-medium ${viewMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>
-                        {m === 'week' ? 'Semaine' : m === 'month' ? 'Mois' : 'Année'}
+                        {m === 'week' ? 'Semaine' : 'Mois'}
                       </button>
                     ))}
                   </div>
@@ -3003,88 +3221,6 @@ const AnesthesistScheduler = () => {
                               {a.name.split(' ')[1]?.substring(0, 3)}
                             </div>
                           )))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Vue Année */}
-              {viewMode === 'year' && (
-                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-                  <div className="p-4 border-b flex items-center justify-between">
-                    <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear() - 1, 0, 1))} className="p-2 rounded-xl hover:bg-gray-100">
-                      <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <h3 className="text-lg font-bold">{currentMonth.getFullYear()}</h3>
-                    <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear() + 1, 0, 1))} className="p-2 rounded-xl hover:bg-gray-100">
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-4 gap-4 p-4">
-                    {Array.from({ length: 12 }, (_, monthIndex) => {
-                      const monthDate = new Date(currentMonth.getFullYear(), monthIndex, 1);
-                      const monthName = monthDate.toLocaleDateString('fr-FR', { month: 'long' });
-                      const daysInMonth = new Date(currentMonth.getFullYear(), monthIndex + 1, 0).getDate();
-
-                      // Calculer les stats du mois
-                      let totalAssignments = 0;
-                      let weCount = 0;
-
-                      for (let day = 1; day <= daysInMonth; day++) {
-                        const d = new Date(currentMonth.getFullYear(), monthIndex, day);
-                        const dateKey = formatDateKey(d);
-                        const daySchedule = schedule[dateKey];
-                        if (daySchedule) {
-                          Object.values(daySchedule).forEach(ids => {
-                            totalAssignments += ids.length;
-                          });
-                        }
-                        if (isWeekend(d)) weCount++;
-                      }
-
-                      return (
-                        <div
-                          key={monthIndex}
-                          className="border rounded-xl p-3 hover:bg-gray-50 cursor-pointer transition-all"
-                          onClick={() => {
-                            setCurrentMonth(monthDate);
-                            setViewMode('month');
-                          }}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-semibold capitalize">{monthName}</span>
-                            <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: theme.gray[100] }}>
-                              {daysInMonth}j
-                            </span>
-                          </div>
-                          <div className="text-xs space-y-1" style={{ color: theme.gray[500] }}>
-                            <div className="flex justify-between">
-                              <span>Assignations:</span>
-                              <span className="font-medium" style={{ color: theme.gray[700] }}>{totalAssignments}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Week-ends:</span>
-                              <span className="font-medium" style={{ color: theme.gray[700] }}>{weCount / 2} WE</span>
-                            </div>
-                          </div>
-                          {/* Mini calendrier visuel */}
-                          <div className="mt-2 grid grid-cols-7 gap-0.5">
-                            {Array.from({ length: daysInMonth }, (_, i) => {
-                              const d = new Date(currentMonth.getFullYear(), monthIndex, i + 1);
-                              const dateKey = formatDateKey(d);
-                              const hasData = schedule[dateKey] && Object.keys(schedule[dateKey]).length > 0;
-                              const isWE = isWeekend(d);
-                              return (
-                                <div
-                                  key={i}
-                                  className={`w-2 h-2 rounded-sm ${hasData ? 'bg-blue-500' : isWE ? 'bg-gray-200' : 'bg-gray-100'}`}
-                                  title={`${i + 1} ${monthName}`}
-                                />
-                              );
-                            })}
-                          </div>
                         </div>
                       );
                     })}
