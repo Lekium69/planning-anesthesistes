@@ -591,6 +591,384 @@ const LoginPage = ({ onLogin }) => {
 };
 
 // ============================================
+// COMPOSANT RECAP VIEW - Vue synthétique longue période
+// ============================================
+const RecapView = ({ anesthesists, schedule, remplacements, remplacants, iades, scheduleIades, isHoliday, getHolidayName, theme, currentUser }) => {
+  const [recapMonthStart, setRecapMonthStart] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [nbMonths, setNbMonths] = useState(2);
+  const [showIadesRecap, setShowIadesRecap] = useState(false);
+
+  // Générer tous les jours de la période
+  const getRecapDays = () => {
+    const days = [];
+    const start = new Date(recapMonthStart);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + nbMonths);
+    const d = new Date(start);
+    while (d < end) {
+      days.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return days;
+  };
+
+  const recapDays = getRecapDays();
+
+  // Grouper par mois pour les headers
+  const monthGroups = [];
+  let currentMonthKey = '';
+  recapDays.forEach(d => {
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    if (key !== currentMonthKey) {
+      currentMonthKey = key;
+      monthGroups.push({ date: new Date(d), count: 0 });
+    }
+    monthGroups[monthGroups.length - 1].count++;
+  });
+
+  // Grouper par semaine
+  const weekGroups = [];
+  let currentWeekNum = -1;
+  recapDays.forEach(d => {
+    const wn = getWeekNumber(d);
+    if (wn !== currentWeekNum) {
+      currentWeekNum = wn;
+      weekGroups.push({ weekNum: wn, count: 0 });
+    }
+    weekGroups[weekGroups.length - 1].count++;
+  });
+
+  // Récupérer le rôle d'une personne pour un jour donné
+  const getPersonShifts = (anesthId, dateKey) => {
+    const daySchedule = schedule[dateKey];
+    if (!daySchedule) return [];
+    const shifts = [];
+    Object.entries(daySchedule).forEach(([shift, entries]) => {
+      entries.forEach(e => {
+        if (e.type === 'titulaire' && e.id === anesthId) shifts.push(shift);
+      });
+    });
+    return shifts;
+  };
+
+  // Récupérer les remplaçants pour un jour
+  const getRemplacantShifts = (dateKey) => {
+    const daySchedule = schedule[dateKey];
+    if (!daySchedule) return [];
+    const result = [];
+    Object.entries(daySchedule).forEach(([shift, entries]) => {
+      entries.forEach(e => {
+        if (e.type === 'remplacant') {
+          result.push({ name: e.name, shift });
+        }
+      });
+    });
+    return result;
+  };
+
+  // Code couleur pour les shifts
+  const shiftColors = {
+    astreinte: { bg: '#fef3c7', text: '#92400e', label: 'A' },
+    bloc: { bg: '#dbeafe', text: '#1e40af', label: 'B' },
+    consultation: { bg: '#d1fae5', text: '#065f46', label: 'C' },
+    astreinte_we: { bg: '#ede9fe', text: '#5b21b6', label: 'WE' },
+    astreinte_ferie: { bg: '#fce7f3', text: '#9d174d', label: 'F' },
+  };
+
+  const titulaires = anesthesists.filter(a => isTitulaire(a));
+
+  const today = formatDateKey(new Date());
+
+  return (
+    <div>
+      {/* Contrôles */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setRecapMonthStart(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100 border"><ChevronLeft className="w-5 h-5" /></button>
+            <span className="px-4 py-2 rounded-xl font-bold text-white text-sm" style={{ backgroundColor: theme.primary }}>
+              {recapMonthStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+              {nbMonths > 1 && ` → ${new Date(recapMonthStart.getFullYear(), recapMonthStart.getMonth() + nbMonths - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`}
+            </span>
+            <button onClick={() => setRecapMonthStart(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100 border"><ChevronRight className="w-5 h-5" /></button>
+            <button onClick={() => setRecapMonthStart(new Date(new Date().getFullYear(), new Date().getMonth(), 1))} className="px-3 py-2 rounded-xl text-sm bg-gray-100 border">Aujourd'hui</button>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm" style={{ color: theme.gray[600] }}>Durée :</span>
+            {[1, 2, 3, 6].map(n => (
+              <button key={n} onClick={() => setNbMonths(n)} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${nbMonths === n ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>
+                {n} mois
+              </button>
+            ))}
+            <div className="border-l border-gray-300 h-6 mx-1"></div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={showIadesRecap} onChange={(e) => setShowIadesRecap(e.target.checked)} className="w-4 h-4 rounded" />
+              <span className="text-sm font-medium" style={{ color: theme.gray[600] }}>IADES</span>
+            </label>
+            <button onClick={() => window.print()} className="px-3 py-1.5 rounded-lg text-sm font-medium border flex items-center gap-1 hover:bg-gray-50">
+              <Printer className="w-4 h-4" /> Imprimer
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Légende */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-3 mb-4">
+        <div className="flex items-center gap-4 flex-wrap text-xs">
+          <span className="font-medium" style={{ color: theme.gray[600] }}>Légende :</span>
+          {Object.entries(shiftColors).map(([key, val]) => (
+            <div key={key} className="flex items-center gap-1">
+              <span className="inline-block px-2 py-0.5 rounded font-bold" style={{ backgroundColor: val.bg, color: val.text }}>{val.label}</span>
+              <span style={{ color: theme.gray[600] }}>{getShiftLabel(key)}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-1">
+            <span className="inline-block px-2 py-0.5 rounded font-bold bg-gray-200 text-gray-600">🔄</span>
+            <span style={{ color: theme.gray[600] }}>Remplaçant</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tableau principal */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 300px)' }}>
+          <table className="border-collapse" style={{ minWidth: `${recapDays.length * 38 + 140}px` }}>
+            <thead className="sticky top-0 z-20">
+              {/* Ligne mois */}
+              <tr>
+                <th className="sticky left-0 z-30 bg-white border-b border-r px-3 py-1" rowSpan={3} style={{ minWidth: '140px', backgroundColor: theme.gray[50] }}>
+                  <span className="text-sm font-bold" style={{ color: theme.gray[700] }}>Anesthésistes</span>
+                </th>
+                {monthGroups.map((mg, i) => (
+                  <th key={i} colSpan={mg.count} className="border-b border-r text-center py-1 text-xs font-bold uppercase tracking-wider" style={{ backgroundColor: theme.primary, color: 'white' }}>
+                    {mg.date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })}
+                  </th>
+                ))}
+              </tr>
+              {/* Ligne semaines */}
+              <tr>
+                {weekGroups.map((wg, i) => (
+                  <th key={i} colSpan={wg.count} className="border-b border-r text-center py-0.5 text-xs" style={{ backgroundColor: theme.gray[100], color: theme.gray[500] }}>
+                    S{wg.weekNum}
+                  </th>
+                ))}
+              </tr>
+              {/* Ligne jours */}
+              <tr>
+                {recapDays.map((d, i) => {
+                  const dk = formatDateKey(d);
+                  const isWE = isWeekend(d);
+                  const isHol = isHoliday(d);
+                  const isToday = dk === today;
+                  return (
+                    <th key={i} className="border-b border-r text-center py-1" style={{
+                      minWidth: '36px', maxWidth: '36px',
+                      backgroundColor: isToday ? '#3b82f6' : isHol ? '#fef3c7' : isWE ? theme.gray[100] : 'white',
+                      color: isToday ? 'white' : isWE ? theme.gray[400] : theme.gray[700],
+                    }} title={`${d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}${isHol ? ' - ' + (getHolidayName(d) || 'Férié') : ''}`}>
+                      <div className="text-xs font-medium" style={{ fontSize: '10px' }}>{d.toLocaleDateString('fr-FR', { weekday: 'narrow' })}</div>
+                      <div className="text-xs font-bold">{d.getDate()}</div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {/* Lignes titulaires */}
+              {titulaires.map(a => (
+                <tr key={a.id} className="hover:bg-gray-50/50">
+                  <td className="sticky left-0 z-10 border-b border-r px-3 py-2 bg-white" style={{ minWidth: '140px' }}>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
+                      <span className="text-sm font-medium truncate" style={{ color: theme.gray[800] }}>
+                        {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1] || a.name.split(' ')[0]}
+                      </span>
+                    </div>
+                  </td>
+                  {recapDays.map((d, i) => {
+                    const dk = formatDateKey(d);
+                    const isWE = isWeekend(d);
+                    const isHol = isHoliday(d);
+                    const shifts = getPersonShifts(a.id, dk);
+                    const isToday = dk === today;
+
+                    if (shifts.length === 0) {
+                      return (
+                        <td key={i} className="border-b border-r text-center" style={{
+                          minWidth: '36px', maxWidth: '36px',
+                          backgroundColor: isToday ? '#eff6ff' : isWE ? theme.gray[50] : isHol ? '#fffbeb' : 'white',
+                        }} />
+                      );
+                    }
+
+                    // Déterminer le shift principal à afficher
+                    const mainShift = shifts.includes('astreinte_we') ? 'astreinte_we'
+                      : shifts.includes('astreinte_ferie') ? 'astreinte_ferie'
+                      : shifts.includes('astreinte') ? 'astreinte'
+                      : shifts.includes('consultation') ? 'consultation'
+                      : 'bloc';
+                    const sc = shiftColors[mainShift];
+
+                    // S'il y a astreinte + bloc, montrer A+B
+                    const hasAstrAndBloc = shifts.includes('astreinte') && shifts.includes('bloc');
+                    const displayLabel = hasAstrAndBloc ? 'A+B' : shifts.length > 1 ? shifts.map(s => shiftColors[s]?.label || '?').join('+') : sc.label;
+
+                    return (
+                      <td key={i} className="border-b border-r text-center p-0" style={{
+                        minWidth: '36px', maxWidth: '36px',
+                        backgroundColor: isToday ? sc.bg : sc.bg,
+                      }} title={`${a.name} - ${shifts.map(s => getShiftLabel(s)).join(' + ')} - ${d.toLocaleDateString('fr-FR')}`}>
+                        <span className="text-xs font-bold block py-1" style={{ color: sc.text, fontSize: '10px' }}>
+                          {displayLabel}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+
+              {/* Ligne remplaçants */}
+              {(() => {
+                // Collecter les noms de remplaçants uniques présents dans la période
+                const remplacantNames = new Set();
+                recapDays.forEach(d => {
+                  const dk = formatDateKey(d);
+                  getRemplacantShifts(dk).forEach(r => remplacantNames.add(r.name));
+                });
+
+                if (remplacantNames.size === 0) return null;
+
+                return (
+                  <>
+                    <tr>
+                      <td colSpan={recapDays.length + 1} className="border-b py-1 px-3 text-xs font-bold uppercase tracking-wider" style={{ backgroundColor: theme.gray[200], color: theme.gray[600] }}>
+                        Remplaçants
+                      </td>
+                    </tr>
+                    {[...remplacantNames].sort().map(name => (
+                      <tr key={name} className="hover:bg-gray-50/50">
+                        <td className="sticky left-0 z-10 border-b border-r px-3 py-2 bg-white" style={{ minWidth: '140px' }}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs">🔄</span>
+                            <span className="text-sm font-medium truncate" style={{ color: theme.gray[600] }}>
+                              {name.split(' ')[1] || name.split(' ')[0]}
+                            </span>
+                          </div>
+                        </td>
+                        {recapDays.map((d, i) => {
+                          const dk = formatDateKey(d);
+                          const isWE = isWeekend(d);
+                          const isHol = isHoliday(d);
+                          const isToday = dk === today;
+                          const rShifts = getRemplacantShifts(dk).filter(r => r.name === name);
+
+                          if (rShifts.length === 0) {
+                            return <td key={i} className="border-b border-r" style={{
+                              minWidth: '36px', maxWidth: '36px',
+                              backgroundColor: isToday ? '#eff6ff' : isWE ? theme.gray[50] : isHol ? '#fffbeb' : 'white',
+                            }} />;
+                          }
+
+                          const mainShift = rShifts[0].shift;
+                          const sc = shiftColors[mainShift] || { bg: '#e5e7eb', text: '#374151', label: '?' };
+
+                          return (
+                            <td key={i} className="border-b border-r text-center p-0" style={{
+                              minWidth: '36px', maxWidth: '36px', backgroundColor: sc.bg,
+                            }} title={`${name} - ${rShifts.map(r => getShiftLabel(r.shift)).join(' + ')} - ${d.toLocaleDateString('fr-FR')}`}>
+                              <span className="text-xs font-bold block py-1" style={{ color: sc.text, fontSize: '10px' }}>
+                                {rShifts.length > 1 ? rShifts.map(r => shiftColors[r.shift]?.label || '?').join('+') : sc.label}
+                              </span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </>
+                );
+              })()}
+
+              {/* Section IADES */}
+              {showIadesRecap && iades.filter(i => i.is_titulaire && i.actif).length > 0 && (
+                <>
+                  <tr>
+                    <td colSpan={recapDays.length + 1} className="border-b py-1 px-3 text-xs font-bold uppercase tracking-wider" style={{ backgroundColor: '#059669', color: 'white' }}>
+                      IADES
+                    </td>
+                  </tr>
+                  {iades.filter(i => i.is_titulaire && i.actif).map(iade => (
+                    <tr key={iade.id} className="hover:bg-gray-50/50">
+                      <td className="sticky left-0 z-10 border-b border-r px-3 py-2 bg-white" style={{ minWidth: '140px' }}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: iade.color }} />
+                          <span className="text-sm font-medium truncate" style={{ color: theme.gray[800] }}>
+                            {iade.name.split(' ')[0]}
+                          </span>
+                        </div>
+                      </td>
+                      {recapDays.map((d, i) => {
+                        const dk = formatDateKey(d);
+                        const isWE = isWeekend(d);
+                        const isHol = isHoliday(d);
+                        const isToday = dk === today;
+                        const daySchedule = scheduleIades[dk];
+                        let hasShift = false;
+                        let heures = '';
+
+                        if (daySchedule) {
+                          Object.values(daySchedule).forEach(entries => {
+                            entries.forEach(e => {
+                              if (e.id === iade.id) {
+                                hasShift = true;
+                                if (e.heure_debut && e.heure_fin) {
+                                  heures = `${e.heure_debut?.slice(0,5)}-${e.heure_fin?.slice(0,5)}`;
+                                }
+                              }
+                            });
+                          });
+                        }
+
+                        return (
+                          <td key={i} className="border-b border-r text-center p-0" style={{
+                            minWidth: '36px', maxWidth: '36px',
+                            backgroundColor: hasShift ? '#d1fae5' : isToday ? '#eff6ff' : isWE ? theme.gray[50] : isHol ? '#fffbeb' : 'white',
+                          }} title={hasShift ? `${iade.name} - ${heures || 'Journée'} - ${d.toLocaleDateString('fr-FR')}` : ''}>
+                            {hasShift && (
+                              <span className="text-xs font-bold block py-1" style={{ color: '#065f46', fontSize: '10px' }}>
+                                ●
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Style impression */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .bg-white.rounded-2xl.border.border-gray-200.overflow-hidden,
+          .bg-white.rounded-2xl.border.border-gray-200.overflow-hidden * { visibility: visible; }
+          .bg-white.rounded-2xl.border.border-gray-200.overflow-hidden { position: absolute; left: 0; top: 0; width: 100%; }
+          table { font-size: 8px !important; }
+          td, th { padding: 1px !important; }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+// ============================================
 // COMPOSANT ETP MODAL (avec validation 400%)
 // ============================================
 const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
@@ -2447,13 +2825,14 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border p-4 mb-6">
                 <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
                   <div className="flex gap-2">
-                    {['week', 'month'].map(m => (
+                    {['week', 'month', 'recap'].map(m => (
                       <button key={m} onClick={() => setViewMode(m)} className={`px-4 py-2 rounded-xl text-sm font-medium ${viewMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>
-                        {m === 'week' ? 'Semaine' : 'Mois'}
+                        {m === 'week' ? 'Semaine' : m === 'month' ? 'Mois' : '📋 Récap'}
                       </button>
                     ))}
                   </div>
                 </div>
+                {viewMode !== 'recap' && (
                 <div className="flex items-center justify-center gap-2">
                   <button onClick={() => viewMode === 'week' ? setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; }) : setCurrentMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronLeft className="w-5 h-5" /></button>
                   <button onClick={() => { setCurrentWeekStart(getMonday(new Date())); setCurrentMonth(new Date()); }} className="px-3 py-2 rounded-xl text-sm bg-gray-100">Aujourd'hui</button>
@@ -2462,6 +2841,7 @@ const AnesthesistScheduler = () => {
                   </span>
                   <button onClick={() => viewMode === 'week' ? setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; }) : setCurrentMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronRight className="w-5 h-5" /></button>
                 </div>
+                )}
               </div>
 
               {/* Filtres */}
@@ -2541,6 +2921,21 @@ const AnesthesistScheduler = () => {
                     })}
                   </div>
                 </div>
+              )}
+
+              {/* Vue Récap - Tableau synthétique longue période */}
+              {viewMode === 'recap' && (
+                <RecapView
+                  anesthesists={anesthesists}
+                  schedule={schedule}
+                  remplacements={remplacements}
+                  remplacants={remplacants}
+                  iades={iades}
+                  scheduleIades={scheduleIades}
+                  isHoliday={isHoliday}
+                  getHolidayName={getHolidayName}
+                  theme={theme}
+                />
               )}
             </>
           )}
@@ -2875,9 +3270,9 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
-                    {['week', 'month'].map(m => (
+                    {['week', 'month', 'recap'].map(m => (
                       <button key={m} onClick={() => setViewMode(m)} className={`px-4 py-2 rounded-xl text-sm font-medium ${viewMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100'}`}>
-                        {m === 'week' ? 'Semaine' : 'Mois'}
+                        {m === 'week' ? 'Semaine' : m === 'month' ? 'Mois' : '📋 Récap'}
                       </button>
                     ))}
                   </div>
@@ -3129,7 +3524,24 @@ const AnesthesistScheduler = () => {
                 </div>
               )}
 
+              {/* Vue Récap - Tableau synthétique longue période */}
+              {viewMode === 'recap' && (
+                <RecapView
+                  anesthesists={anesthesists}
+                  schedule={schedule}
+                  remplacements={remplacements}
+                  remplacants={remplacants}
+                  iades={iades}
+                  scheduleIades={scheduleIades}
+                  isHoliday={isHoliday}
+                  getHolidayName={getHolidayName}
+                  theme={theme}
+                  currentUser={currentUser}
+                />
+              )}
+
               {/* Filtres */}
+              {viewMode !== 'recap' && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 mt-6">
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="font-medium text-sm" style={{ color: theme.gray[700] }}><Users className="w-4 h-4 inline mr-1" />Filtrer :</span>
@@ -3196,6 +3608,7 @@ const AnesthesistScheduler = () => {
                   </label>
                 </div>
               </div>
+              )}
             </div>
           )}
 
