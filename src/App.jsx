@@ -4038,6 +4038,49 @@ const AnesthesistScheduler = () => {
           {/* ADMIN */}
           {currentView === 'admin' && (canManageAnesthesists || canManageIades) && (
             <div>
+              {/* Lien public de consultation du planning */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <ExternalLink className="w-5 h-5" style={{ color: theme.primary }} />
+                  <h3 className="font-bold">Lien public de consultation du planning</h3>
+                </div>
+                <p className="text-sm mb-4" style={{ color: theme.gray[600] }}>
+                  À partager avec le secrétariat, la direction ou les IADEs pour consulter le planning sans avoir besoin d'un compte. La vue <strong>Récap</strong> offre un aperçu synthétique sur plusieurs mois.
+                </p>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={window.location.origin + '/'}
+                    onClick={(e) => e.target.select()}
+                    className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50 font-mono"
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.origin + '/');
+                      alert('Lien copié dans le presse-papiers !');
+                    }}
+                    className="px-4 py-2 text-white rounded-xl font-medium flex items-center justify-center gap-2"
+                    style={{ backgroundColor: theme.primary }}
+                  >
+                    <Copy className="w-4 h-4" /> Copier
+                  </button>
+                  <a
+                    href={window.location.origin + '/'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-2 border"
+                    style={{ borderColor: theme.gray[300], color: theme.gray[700] }}
+                  >
+                    <ExternalLink className="w-4 h-4" /> Ouvrir
+                  </a>
+                </div>
+                <div className="mt-3 text-xs flex items-start gap-2 p-3 rounded-xl" style={{ backgroundColor: theme.gray[100], color: theme.gray[600] }}>
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>Les visiteurs accèdent en lecture seule. Ils peuvent naviguer entre les vues Semaine, Mois et Récap, mais ne peuvent rien modifier.</span>
+                </div>
+              </div>
+
               {/* Gestion des médecins - Visible uniquement pour Admin global */}
               {canManageAnesthesists && (
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
