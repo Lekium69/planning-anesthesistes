@@ -2412,24 +2412,7 @@ const AnesthesistScheduler = () => {
       // Helper pour extraire les IDs des titulaires
       const getIds = (entries) => entries?.filter(e => e.type === 'titulaire').map(e => e.id) || [];
 
-      if (isWE) {
-        const astreinteWE = shifts.astreinte_we || [];
-        if (astreinteWE.length === 0) {
-          incoherences.push({
-            date: dateStr,
-            type: 'missing_astreinte_we',
-            message: 'Week-end sans astreinte',
-            severity: 'error'
-          });
-        } else if (astreinteWE.length > 1) {
-          incoherences.push({
-            date: dateStr,
-            type: 'multiple_astreinte_we',
-            message: `${astreinteWE.length} personnes d'astreinte WE`,
-            severity: 'warning'
-          });
-        }
-      } else if (isHol) {
+      if (isHol) {
         const astreinteFerie = shifts.astreinte_ferie || [];
         if (astreinteFerie.length === 0) {
           incoherences.push({
@@ -2444,6 +2427,23 @@ const AnesthesistScheduler = () => {
             date: dateStr,
             type: 'multiple_astreinte_ferie',
             message: `${astreinteFerie.length} personnes d'astreinte férié`,
+            severity: 'warning'
+          });
+        }
+      } else if (isWE) {
+        const astreinteWE = shifts.astreinte_we || [];
+        if (astreinteWE.length === 0) {
+          incoherences.push({
+            date: dateStr,
+            type: 'missing_astreinte_we',
+            message: 'Week-end sans astreinte',
+            severity: 'error'
+          });
+        } else if (astreinteWE.length > 1) {
+          incoherences.push({
+            date: dateStr,
+            type: 'multiple_astreinte_we',
+            message: `${astreinteWE.length} personnes d'astreinte WE`,
             severity: 'warning'
           });
         }
