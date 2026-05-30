@@ -35,16 +35,18 @@ const theme = {
 };
 
 // Couleurs très distinctes pour les anesthésistes
-const DISTINCT_COLORS = [
-  '#2563eb', // Bleu vif
-  '#dc2626', // Rouge
-  '#059669', // Vert émeraude
-  '#7c3aed', // Violet
-  '#ea580c', // Orange
-  '#0891b2', // Cyan
-  '#c026d3', // Magenta
-  '#65a30d', // Vert lime
-];
+const COULEURS_MEDECINS = {
+  1: '#2563eb',  // FAUVET — bleu
+  2: '#dc2626',  // TAILLARDAT — rouge
+  3: '#16a34a',  // CARLE — vert
+  4: '#9333ea',  // COMBAZ — violet
+  5: '#f59e0b',  // SALLABERRY — ambre
+  6: '#0e7490',  // JOURDAN — cyan foncé
+  7: '#475569',  // BELLIER — ardoise (inactif)
+  8: '#84cc16',  // EL KAMEL — vert lime
+  16: '#db2777', // LAVOLAINE — rose magenta
+};
+const COULEUR_DEFAUT = '#94a3b8'; // gris pour tout autre compte (secrétariat, direction, futurs ajouts)
 
 // ============================================
 // HELPERS
@@ -1248,9 +1250,9 @@ const AnesthesistScheduler = () => {
 
       // Anesthésistes avec couleurs
       if (anesth.data) {
-        const anesthWithColors = anesth.data.map((a, index) => ({
+        const anesthWithColors = anesth.data.map((a) => ({
           ...a,
-          color: DISTINCT_COLORS[index % DISTINCT_COLORS.length]
+          color: COULEURS_MEDECINS[a.id] || COULEUR_DEFAUT
         }));
         setAnesthesists(anesthWithColors);
 
