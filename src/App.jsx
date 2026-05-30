@@ -6,7 +6,7 @@ import {
   CalendarOff, MessageSquare, Shield, ChevronLeft, ChevronRight,
   Copy, ExternalLink, Clock, AlertCircle, Plus, Trash2, PlusCircle,
   Eye, EyeOff, Percent, Phone, Mail, AlertTriangle, Edit2, UserPlus,
-  BarChart3, UserCheck, Replace
+  BarChart3, UserCheck, Replace, Menu
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -688,12 +688,12 @@ const RecapView = ({ anesthesists, schedule, remplacements, remplacants, iades, 
       <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => setRecapMonthStart(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100 border"><ChevronLeft className="w-5 h-5" /></button>
+            <button aria-label="Période précédente" onClick={() => setRecapMonthStart(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100 border"><ChevronLeft className="w-5 h-5" /></button>
             <span className="px-4 py-2 rounded-xl font-bold text-white text-sm" style={{ backgroundColor: theme.primary }}>
               {recapMonthStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
               {nbMonths > 1 && ` → ${new Date(recapMonthStart.getFullYear(), recapMonthStart.getMonth() + nbMonths - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`}
             </span>
-            <button onClick={() => setRecapMonthStart(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100 border"><ChevronRight className="w-5 h-5" /></button>
+            <button aria-label="Période suivante" onClick={() => setRecapMonthStart(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100 border"><ChevronRight className="w-5 h-5" /></button>
             <button onClick={() => setRecapMonthStart(new Date(new Date().getFullYear(), new Date().getMonth(), 1))} className="px-3 py-2 rounded-xl text-sm bg-gray-100 border">Aujourd'hui</button>
           </div>
           <div className="flex items-center gap-3">
@@ -971,7 +971,7 @@ const RecapView = ({ anesthesists, schedule, remplacements, remplacants, iades, 
 // ============================================
 // COMPOSANT ETP MODAL (avec validation 400%)
 // ============================================
-const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
+const ETPModal = ({ anesthesists, onClose, onSave, theme, showToast }) => {
   const TARGET_ETP = 4.0; // 400% = 4 ETP
 
   // État local pour les modifications
@@ -997,7 +997,7 @@ const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
 
   const handleSave = () => {
     if (!isValid) {
-      alert(`Le total doit être égal à ${TARGET_ETP * 100}% (${TARGET_ETP} ETP).\n\nActuellement : ${totalPercent}%`);
+      showToast(`Le total doit être égal à ${TARGET_ETP * 100}% (${TARGET_ETP} ETP). Actuellement : ${totalPercent}%`, 'error');
       return;
     }
     onSave(etpValues);
@@ -1008,7 +1008,7 @@ const ETPModal = ({ anesthesists, onClose, onSave, theme }) => {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
         <div className="p-6 border-b flex items-center justify-between">
           <h2 className="text-xl font-bold">Gestion des ETP</h2>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+          <button aria-label="Fermer" onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-6">
           <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
@@ -1148,6 +1148,29 @@ const AnesthesistScheduler = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+
+  // ============================================
+  // SYSTÈME DE TOASTS + CONFIRMATION (UX)
+  // ============================================
+  const [toasts, setToasts] = useState([]); // [{id, message, type}]
+  const [confirmDialog, setConfirmDialog] = useState(null); // {message, onConfirm}
+  const [sidebarOpen, setSidebarOpen] = useState(false); // drawer mobile
+
+  const showToast = useCallback((message, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const askConfirm = useCallback((message, onConfirm) => {
+    setConfirmDialog({ message, onConfirm });
+  }, []);
 
   // ============================================
   // RÔLES ET PERMISSIONS
@@ -1471,7 +1494,7 @@ const AnesthesistScheduler = () => {
       const activeAnesth = anesthesists.filter(a => a.role !== 'viewer');
 
       if (activeAnesth.length < 3) {
-        alert('Il faut au moins 3 anesthésistes actifs pour générer le planning');
+        showToast('Il faut au moins 3 anesthésistes actifs pour générer le planning', 'error');
         return;
       }
 
@@ -1726,11 +1749,11 @@ const AnesthesistScheduler = () => {
       const modeLabel = mode === 'range'
         ? `Plage du ${new Date(rangeStart).toLocaleDateString('fr-FR')} au ${new Date(rangeEnd).toLocaleDateString('fr-FR')}`
         : 'Planning intégral 18 mois';
-      alert(`✅ ${modeLabel}\n\n${inserts.length} entrées générées\n\n• Semaines complètes (3 personnes/semaine)\n• Astreinte WE = astreinte du vendredi\n• WE et fériés équilibrés`);
+      showToast(`${modeLabel} — ${inserts.length} entrées générées (semaines complètes, astreinte WE = vendredi, WE et fériés équilibrés)`, 'success');
 
     } catch (err) {
       console.error('ERREUR GÉNÉRATION:', err);
-      alert('Erreur: ' + (err.message || err));
+      showToast('Erreur : ' + (err.message || err), 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -1836,10 +1859,11 @@ const AnesthesistScheduler = () => {
 
   const deleteRemplacant = async (id) => {
     if (!canEditPlanning) return;
-    if (!window.confirm('Supprimer ce remplaçant ?')) return;
-
-    await supabase.from('remplacants').update({ actif: false }).eq('id', id);
-    await loadData();
+    askConfirm('Supprimer ce remplaçant ?', async () => {
+      await supabase.from('remplacants').update({ actif: false }).eq('id', id);
+      await loadData();
+      showToast('Remplaçant supprimé', 'success');
+    });
   };
 
   // ============================================
@@ -1891,7 +1915,7 @@ const AnesthesistScheduler = () => {
     if (error) {
       setPasswordError(error.message);
     } else {
-      alert('Mot de passe mis à jour avec succès !');
+      showToast('Mot de passe mis à jour avec succès !', 'success');
       setShowPasswordReset(false);
       setNewPassword('');
       setConfirmPassword('');
@@ -1902,10 +1926,11 @@ const AnesthesistScheduler = () => {
 
   const deleteAnesthesist = async (id) => {
     if (!canManageAnesthesists) return;
-    if (!window.confirm('Supprimer ce médecin ? (Les données de planning seront conservées)')) return;
-
-    await supabase.from('anesthesists').delete().eq('id', id);
-    await loadData();
+    askConfirm('Supprimer ce médecin ? (Les données de planning seront conservées)', async () => {
+      await supabase.from('anesthesists').delete().eq('id', id);
+      await loadData();
+      showToast('Médecin supprimé', 'success');
+    });
   };
 
   // ============================================
@@ -1991,9 +2016,12 @@ const AnesthesistScheduler = () => {
 
   const deleteIade = async (id) => {
     if (!canManageIades) return;
-    await supabase.from('schedule_iades').delete().eq('iade_id', id);
-    await supabase.from('iades').delete().eq('id', id);
-    await loadData();
+    askConfirm('Supprimer cet IADE ?', async () => {
+      await supabase.from('schedule_iades').delete().eq('iade_id', id);
+      await supabase.from('iades').delete().eq('id', id);
+      await loadData();
+      showToast('IADE supprimé', 'success');
+    });
   };
 
   const assignIade = async (date, shift, iadeId, isRemplacant = false, remplacantName = null) => {
@@ -2135,8 +2163,11 @@ const AnesthesistScheduler = () => {
   };
 
   const deleteIadeHeures = async (id) => {
-    await supabase.from('iades_heures').delete().eq('id', id);
-    await loadData();
+    askConfirm('Supprimer cette entrée ?', async () => {
+      await supabase.from('iades_heures').delete().eq('id', id);
+      await loadData();
+      showToast('Entrée supprimée', 'success');
+    });
   };
 
   // ============================================
@@ -2179,9 +2210,11 @@ const AnesthesistScheduler = () => {
 
   const deleteInterimaire = async (id) => {
     if (!canManageIades) return;
-    if (!confirm('Supprimer cet intérimaire ?')) return;
-    await supabase.from('iades_interimaires').delete().eq('id', id);
-    await loadData();
+    askConfirm('Supprimer cet intérimaire ?', async () => {
+      await supabase.from('iades_interimaires').delete().eq('id', id);
+      await loadData();
+      showToast('Intérimaire supprimé', 'success');
+    });
   };
 
   // --- Congés ---
@@ -2225,9 +2258,11 @@ const AnesthesistScheduler = () => {
 
   const deleteConge = async (id) => {
     if (!canManageIades) return;
-    if (!confirm('Supprimer ce congé ?')) return;
-    await supabase.from('iades_conges').delete().eq('id', id);
-    await loadData();
+    askConfirm('Supprimer ce congé ?', async () => {
+      await supabase.from('iades_conges').delete().eq('id', id);
+      await loadData();
+      showToast('Congé supprimé', 'success');
+    });
   };
 
   const validerConge = async (id, statut) => {
@@ -2633,10 +2668,12 @@ const AnesthesistScheduler = () => {
   };
 
   const transferAdmin = async (newAdminId) => {
-    if (!window.confirm('Êtes-vous sûr de vouloir transférer le rôle admin ?')) return;
-    await supabase.from('anesthesists').update({ role: 'user' }).eq('id', currentUser.id);
-    await supabase.from('anesthesists').update({ role: 'admin' }).eq('id', newAdminId);
-    await loadData();
+    askConfirm('Êtes-vous sûr de vouloir transférer le rôle admin ?', async () => {
+      await supabase.from('anesthesists').update({ role: 'user' }).eq('id', currentUser.id);
+      await supabase.from('anesthesists').update({ role: 'admin' }).eq('id', newAdminId);
+      await loadData();
+      showToast('Rôle admin transféré', 'success');
+    });
   };
 
   const updateEmailPreferences = async (prefs) => {
@@ -2834,12 +2871,12 @@ const AnesthesistScheduler = () => {
                 </div>
                 {viewMode !== 'recap' && (
                 <div className="flex items-center justify-center gap-2">
-                  <button onClick={() => viewMode === 'week' ? setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; }) : setCurrentMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronLeft className="w-5 h-5" /></button>
+                  <button aria-label="Période précédente" onClick={() => viewMode === 'week' ? setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; }) : setCurrentMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronLeft className="w-5 h-5" /></button>
                   <button onClick={() => { setCurrentWeekStart(getMonday(new Date())); setCurrentMonth(new Date()); }} className="px-3 py-2 rounded-xl text-sm bg-gray-100">Aujourd'hui</button>
                   <span className="px-3 py-2 rounded-xl font-bold text-white" style={{ backgroundColor: theme.primary }}>
                     {viewMode === 'week' ? `S${getWeekNumber(currentWeekStart)} - ${currentWeekStart.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })}` : currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
                   </span>
-                  <button onClick={() => viewMode === 'week' ? setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; }) : setCurrentMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronRight className="w-5 h-5" /></button>
+                  <button aria-label="Période suivante" onClick={() => viewMode === 'week' ? setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; }) : setCurrentMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronRight className="w-5 h-5" /></button>
                 </div>
                 )}
               </div>
@@ -2944,9 +2981,9 @@ const AnesthesistScheduler = () => {
           {currentView === 'iades-planning' && (
             <>
               <div className="flex items-center justify-center gap-4 mb-6">
-                <button onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100 bg-white border"><ChevronLeft className="w-5 h-5" /></button>
+                <button aria-label="Période précédente" onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100 bg-white border"><ChevronLeft className="w-5 h-5" /></button>
                 <span className="px-4 py-2 rounded-xl font-bold text-white" style={{ backgroundColor: '#059669' }}>S{getWeekNumber(currentWeekStart)} - {currentWeekStart.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</span>
-                <button onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100 bg-white border"><ChevronRight className="w-5 h-5" /></button>
+                <button aria-label="Période suivante" onClick={() => setCurrentWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; })} className="p-2 rounded-xl hover:bg-gray-100 bg-white border"><ChevronRight className="w-5 h-5" /></button>
                 <button onClick={() => setCurrentWeekStart(getMonday(new Date()))} className="px-3 py-2 rounded-xl text-sm bg-white border">Aujourd'hui</button>
               </div>
 
@@ -3010,7 +3047,7 @@ const AnesthesistScheduler = () => {
         {showLoginModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative">
-              <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
               <LoginPage onLogin={(u) => { setUser(u); setShowLoginModal(false); }} />
             </div>
           </div>
@@ -3023,8 +3060,12 @@ const AnesthesistScheduler = () => {
   // ============================================
   return (
     <div className="min-h-screen flex" style={{ backgroundColor: theme.gray[100] }}>
+      {/* Overlay mobile (ferme le drawer au clic) */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+      )}
       {/* Sidebar */}
-      <div className="w-64 text-white flex flex-col fixed h-screen" style={{ backgroundColor: theme.primary }}>
+      <div className={`w-64 text-white flex flex-col fixed h-screen z-40 transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`} style={{ backgroundColor: theme.primary }}>
         <div className="p-6 border-b border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
@@ -3051,7 +3092,7 @@ const AnesthesistScheduler = () => {
           ].filter(item => item.show).map(item => (
             <button
               key={item.id}
-              onClick={() => setCurrentView(item.id)}
+              onClick={() => { setSidebarOpen(false); setCurrentView(item.id); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all ${
                 currentView === item.id ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
               }`}
@@ -3080,7 +3121,7 @@ const AnesthesistScheduler = () => {
             {iadesMenuOpen && (
               <div className="ml-4 space-y-1">
                 <button
-                  onClick={() => setCurrentView('iades-planning')}
+                  onClick={() => { setSidebarOpen(false); setCurrentView('iades-planning'); }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                     currentView === 'iades-planning' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
@@ -3089,7 +3130,7 @@ const AnesthesistScheduler = () => {
                   <span>Planning</span>
                 </button>
                 <button
-                  onClick={() => setCurrentView('iades-list')}
+                  onClick={() => { setSidebarOpen(false); setCurrentView('iades-list'); }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                     currentView === 'iades-list' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
@@ -3098,7 +3139,7 @@ const AnesthesistScheduler = () => {
                   <span>Équipe</span>
                 </button>
                 <button
-                  onClick={() => setCurrentView('iades-interimaires')}
+                  onClick={() => { setSidebarOpen(false); setCurrentView('iades-interimaires'); }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                     currentView === 'iades-interimaires' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
@@ -3107,7 +3148,7 @@ const AnesthesistScheduler = () => {
                   <span>Intérimaires</span>
                 </button>
                 <button
-                  onClick={() => setCurrentView('iades-pointage')}
+                  onClick={() => { setSidebarOpen(false); setCurrentView('iades-pointage'); }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                     currentView === 'iades-pointage' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
@@ -3116,7 +3157,7 @@ const AnesthesistScheduler = () => {
                   <span>Pointage</span>
                 </button>
                 <button
-                  onClick={() => setCurrentView('iades-conges')}
+                  onClick={() => { setSidebarOpen(false); setCurrentView('iades-conges'); }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                     currentView === 'iades-conges' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
@@ -3125,7 +3166,7 @@ const AnesthesistScheduler = () => {
                   <span>Congés</span>
                 </button>
                 <button
-                  onClick={() => setCurrentView('iades-stats')}
+                  onClick={() => { setSidebarOpen(false); setCurrentView('iades-stats'); }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                     currentView === 'iades-stats' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                   }`}
@@ -3135,7 +3176,7 @@ const AnesthesistScheduler = () => {
                 </button>
                 {canManageIades && (
                   <button
-                    onClick={() => setCurrentView('iades-admin')}
+                    onClick={() => { setSidebarOpen(false); setCurrentView('iades-admin'); }}
                     className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm transition-all ${
                       currentView === 'iades-admin' ? 'bg-white/20' : 'hover:bg-white/10 text-white/70'
                     }`}
@@ -3165,10 +3206,15 @@ const AnesthesistScheduler = () => {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 ml-64">
+      <div className="flex-1 lg:ml-64">
         {/* Header */}
-        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10">
-          <h1 className="text-xl font-bold" style={{ color: theme.gray[800] }}>
+        <header className="bg-white border-b border-gray-200 px-4 md:px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-3 min-w-0">
+            <button aria-label="Ouvrir le menu" onClick={() => setSidebarOpen(true)}
+              className="lg:hidden p-2 -ml-2 rounded-xl hover:bg-gray-100 shrink-0">
+              <Menu className="w-6 h-6" style={{ color: theme.gray[800] }} />
+            </button>
+            <h1 className="text-lg md:text-xl font-bold truncate" style={{ color: theme.gray[800] }}>
             {currentView === 'dashboard' && 'Tableau de bord'}
             {currentView === 'planning' && 'Planning'}
             {currentView === 'stats' && 'Statistiques'}
@@ -3187,6 +3233,7 @@ const AnesthesistScheduler = () => {
             {currentView === 'admin' && 'Administration'}
             {currentView === 'settings' && 'Paramètres'}
           </h1>
+          </div>
           <div className="flex items-center gap-3">
             {!isViewer && (
               <button onClick={() => setShowNotifications(true)} className="relative p-2 rounded-xl hover:bg-gray-100">
@@ -4058,7 +4105,7 @@ const AnesthesistScheduler = () => {
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(window.location.origin + '/');
-                      alert('Lien copié dans le presse-papiers !');
+                      showToast('Lien copié dans le presse-papiers !', 'success');
                     }}
                     className="px-4 py-2 text-white rounded-xl font-medium flex items-center justify-center gap-2"
                     style={{ backgroundColor: theme.primary }}
@@ -4302,7 +4349,7 @@ const AnesthesistScheduler = () => {
                                   <Edit2 className="w-4 h-4" />
                                 </button>
                                 <button
-                                  onClick={() => { if(confirm('Supprimer cet IADE ?')) deleteIade(iade.id); }}
+                                  onClick={() => deleteIade(iade.id)}
                                   className="p-2 rounded-xl hover:bg-red-50"
                                   style={{ color: theme.danger }}
                                 >
@@ -4340,7 +4387,7 @@ const AnesthesistScheduler = () => {
                 <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>Ajoutez ce lien à Google Agenda, Outlook ou Apple Calendar.</p>
                 <div className="flex gap-2">
                   <input type="text" readOnly value={`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`} className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50" />
-                  <button onClick={() => { navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`); alert('Lien copié !'); }} className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50">
+                  <button onClick={() => { navigator.clipboard.writeText(`https://vqlieplrtrvqcvllhmob.supabase.co/functions/v1/smart-handler/${currentUser?.ics_token}.ics`); showToast('Lien copié !', 'success'); }} className="px-4 py-2 rounded-xl border border-gray-200 flex items-center gap-2 hover:bg-gray-50">
                     <Copy className="w-4 h-4" /> Copier
                   </button>
                 </div>
@@ -4567,7 +4614,7 @@ const AnesthesistScheduler = () => {
                               <button onClick={() => setEditingIade(iade)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
                                 <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
                               </button>
-                              <button onClick={() => { if(confirm('Supprimer cet IADE ?')) deleteIade(iade.id); }} className="p-1.5 rounded hover:bg-red-100">
+                              <button onClick={() => deleteIade(iade.id)} className="p-1.5 rounded hover:bg-red-100">
                                 <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
                               </button>
                             </td>
@@ -4632,7 +4679,7 @@ const AnesthesistScheduler = () => {
                               <button onClick={() => setEditingIade(iade)} className="p-1.5 rounded hover:bg-gray-100 mr-1">
                                 <Edit2 className="w-4 h-4" style={{ color: theme.gray[500] }} />
                               </button>
-                              <button onClick={() => { if(confirm('Supprimer cet IADE ?')) deleteIade(iade.id); }} className="p-1.5 rounded hover:bg-red-100">
+                              <button onClick={() => deleteIade(iade.id)} className="p-1.5 rounded hover:bg-red-100">
                                 <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
                               </button>
                             </td>
@@ -4738,7 +4785,7 @@ const AnesthesistScheduler = () => {
                               <td className="px-4 py-3 text-sm" style={{ color: theme.gray[600] }}>{h.commentaire || '-'}</td>
                               {(isAdmin || (isIade && h.iade_id === currentIade?.id)) && (
                                 <td className="px-4 py-3 text-right">
-                                  <button onClick={() => { if(confirm('Supprimer cette entrée ?')) deleteIadeHeures(h.id); }} className="p-1.5 rounded hover:bg-red-100">
+                                  <button onClick={() => deleteIadeHeures(h.id)} className="p-1.5 rounded hover:bg-red-100">
                                     <Trash2 className="w-4 h-4" style={{ color: theme.danger }} />
                                   </button>
                                 </td>
@@ -4928,7 +4975,7 @@ const AnesthesistScheduler = () => {
                   e.preventDefault();
                   const form = e.target;
                   const iadeId = isIade ? currentIade?.id : parseInt(form.iade_id.value);
-                  if (!iadeId) return alert('Sélectionnez un IADE');
+                  if (!iadeId) return showToast('Sélectionnez un IADE', 'error');
                   
                   await savePointage({
                     iade_id: iadeId,
@@ -5083,7 +5130,7 @@ const AnesthesistScheduler = () => {
                   e.preventDefault();
                   const form = e.target;
                   const iadeId = isIade ? currentIade?.id : parseInt(form.iade_id.value);
-                  if (!iadeId) return alert('Sélectionnez un IADE');
+                  if (!iadeId) return showToast('Sélectionnez un IADE', 'error');
                   
                   await saveConge({
                     iade_id: iadeId,
@@ -5280,7 +5327,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">Générer le planning</h2>
-              <button onClick={() => setShowGenerateModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setShowGenerateModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6">
               <p className="text-sm mb-6" style={{ color: theme.gray[600] }}>
@@ -5372,7 +5419,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">{editingIade.id ? 'Modifier IADE' : 'Nouvel IADE'}</h2>
-              <button onClick={() => setEditingIade(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setEditingIade(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -5432,7 +5479,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">{editingPlage.id ? 'Modifier plage' : 'Nouvelle plage horaire'}</h2>
-              <button onClick={() => setEditingPlage(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setEditingPlage(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -5487,7 +5534,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">{editingInterimaire.id ? 'Modifier intérimaire' : 'Nouvel intérimaire'}</h2>
-              <button onClick={() => setEditingInterimaire(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setEditingInterimaire(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -5554,7 +5601,7 @@ const AnesthesistScheduler = () => {
                   {showPlanningModal.date?.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                 </p>
               </div>
-              <button onClick={() => setShowPlanningModal(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setShowPlanningModal(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -5576,7 +5623,7 @@ const AnesthesistScheduler = () => {
               }
               
               if (!selectedId || !heureDebut || !heureFin) {
-                alert('Veuillez remplir tous les champs');
+                showToast('Veuillez remplir tous les champs', 'error');
                 return;
               }
               
@@ -5701,6 +5748,7 @@ const AnesthesistScheduler = () => {
       {showETPModal && (
         <ETPModal
           anesthesists={anesthesists.filter(a => a.role !== 'viewer')}
+          showToast={showToast}
           onClose={() => setShowETPModal(false)}
           onSave={async (newETPs) => {
             for (const [id, etp] of Object.entries(newETPs)) {
@@ -5719,7 +5767,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white w-full max-w-md h-full shadow-2xl flex flex-col">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">Notifications</h2>
-              <button onClick={() => setShowNotifications(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setShowNotifications(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto">
               {notifications.length === 0 ? (
@@ -5751,7 +5799,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">Demander un échange</h2>
-              <button onClick={() => setShowSwapModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setShowSwapModal(false)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -5812,7 +5860,7 @@ const AnesthesistScheduler = () => {
               <h2 className="text-xl font-bold">
                 {editingRemplacant.id ? 'Modifier le remplaçant' : 'Nouveau remplaçant'}
               </h2>
-              <button onClick={() => setEditingRemplacant(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setEditingRemplacant(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -5894,7 +5942,7 @@ const AnesthesistScheduler = () => {
               <h2 className="text-xl font-bold">
                 {editingAnesth.id ? 'Modifier le médecin' : 'Nouveau médecin'}
               </h2>
-              <button onClick={() => setEditingAnesth(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setEditingAnesth(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -5995,7 +6043,7 @@ const AnesthesistScheduler = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="p-6 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">Qui est remplacé ?</h2>
-              <button onClick={() => setReplacementModal(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              <button aria-label="Fermer" onClick={() => setReplacementModal(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6">
               <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
@@ -6083,6 +6131,56 @@ const AnesthesistScheduler = () => {
                 style={{ backgroundColor: theme.primary }}
               >
                 Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ CONTENEUR DE TOASTS (UX) ============ */}
+      <style>{`@keyframes toastSlideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }`}</style>
+      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-[90vw] sm:max-w-sm" aria-live="polite" aria-atomic="false">
+        {toasts.map((t) => {
+          const palette = {
+            success: { bg: '#ecfdf5', border: '#10b981', icon: <Check className="w-5 h-5" style={{ color: '#10b981' }} /> },
+            error: { bg: '#fef2f2', border: '#ef4444', icon: <AlertCircle className="w-5 h-5" style={{ color: '#ef4444' }} /> },
+            info: { bg: '#eff6ff', border: '#3b82f6', icon: <Bell className="w-5 h-5" style={{ color: '#3b82f6' }} /> },
+          }[t.type] || { bg: '#ecfdf5', border: '#10b981', icon: <Check className="w-5 h-5" style={{ color: '#10b981' }} /> };
+          return (
+            <div key={t.id} role="status"
+              className="flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border-l-4 bg-white"
+              style={{ backgroundColor: palette.bg, borderLeftColor: palette.border, animation: 'toastSlideIn 0.2s ease-out' }}>
+              <div className="shrink-0 mt-0.5">{palette.icon}</div>
+              <p className="text-sm font-medium text-gray-800 whitespace-pre-line flex-1">{t.message}</p>
+              <button onClick={() => dismissToast(t.id)} aria-label="Fermer la notification"
+                className="shrink-0 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ============ MODALE DE CONFIRMATION (UX) ============ */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4"
+          role="dialog" aria-modal="true" aria-label="Confirmation"
+          onClick={() => setConfirmDialog(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: '#fef2f2' }}>
+                <AlertTriangle className="w-5 h-5" style={{ color: '#ef4444' }} />
+              </div>
+              <p className="text-gray-800 font-medium whitespace-pre-line pt-1.5">{confirmDialog.message}</p>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl border border-gray-200 font-medium text-gray-700 hover:bg-gray-50">
+                Annuler
+              </button>
+              <button onClick={() => { const cb = confirmDialog.onConfirm; setConfirmDialog(null); if (cb) cb(); }}
+                className="px-4 py-2 rounded-xl text-white font-medium" style={{ backgroundColor: '#ef4444' }}>
+                Confirmer
               </button>
             </div>
           </div>
