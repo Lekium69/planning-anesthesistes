@@ -1108,6 +1108,8 @@ const AnesthesistScheduler = () => {
   const [swapRequests, setSwapRequests] = useState([]);
   const [exchangeBoard, setExchangeBoard] = useState([]);
   const [unavailabilities, setUnavailabilities] = useState([]);
+  // Journal des modifications récentes du planning (affiché à la direction/secrétariat)
+  const [planningChanges, setPlanningChanges] = useState([]);
   // Filtre "à partir du" pour la vue consolidée des indisponibilités (admin)
   const [unavailFrom, setUnavailFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [emailPreferences, setEmailPreferences] = useState({});
@@ -1252,7 +1254,11 @@ const AnesthesistScheduler = () => {
   const loadData = useCallback(async () => {
     try {
       // 1. DONNÉES PUBLIQUES - chargées pour tout le monde (visiteurs + connectés)
-      const [anesth, rempl, replmts, sched, hol, iadesData, schedIades] = await Promise.all([
+      // Fenêtre des modifications récentes affichées (30 derniers jours)
+      const depuis30j = new Date();
+      depuis30j.setDate(depuis30j.getDate() - 30);
+
+      const [anesth, rempl, replmts, sched, hol, iadesData, schedIades, changesData] = await Promise.all([
         supabase.from('anesthesists').select('*').order('id'),
         supabase.from('remplacants').select('*').eq('actif', true).order('name'),
         supabase.from('remplacements').select('*'),
@@ -1260,7 +1266,13 @@ const AnesthesistScheduler = () => {
         supabase.from('holidays').select('*'),
         supabase.from('iades').select('*').order('name'),
         supabase.from('schedule_iades').select('*').limit(100000),
+        supabase.from('planning_changes').select('*')
+          .gte('created_at', depuis30j.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(200),
       ]);
+
+      if (changesData?.data) setPlanningChanges(changesData.data);
 
       // Anesthésistes avec couleurs
       if (anesth.data) {
@@ -3016,6 +3028,48 @@ const AnesthesistScheduler = () => {
                   theme={theme}
                 />
               )}
+
+              {/* Modifications récentes du planning (30 derniers jours) */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="w-5 h-5" style={{ color: theme.warning }} />
+                  <h3 className="font-bold">Modifications récentes du planning</h3>
+                </div>
+                <p className="text-sm mb-4" style={{ color: theme.gray[500] }}>
+                  Changements enregistrés au cours des 30 derniers jours, du plus récent au plus ancien.
+                </p>
+                {planningChanges.length === 0 ? (
+                  <p style={{ color: theme.gray[500] }}>Aucune modification sur cette période.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {planningChanges.map(c => {
+                      const roleLabel = getShiftLabel(c.shift);
+                      let detail;
+                      if (c.action === 'INSERT') {
+                        detail = <>ajout de <strong>{c.new_name || '—'}</strong></>;
+                      } else if (c.action === 'DELETE') {
+                        detail = <>retrait de <strong>{c.old_name || '—'}</strong></>;
+                      } else {
+                        detail = <><strong>{c.old_name || '—'}</strong> remplacé(e) par <strong>{c.new_name || '—'}</strong></>;
+                      }
+                      return (
+                        <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 p-3 rounded-xl border border-gray-100" style={{ backgroundColor: theme.gray[50] }}>
+                          <span className="text-sm font-semibold" style={{ color: theme.primary }}>
+                            {new Date(c.change_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: theme.gray[200], color: theme.gray[600] }}>
+                            {roleLabel}
+                          </span>
+                          <span className="text-sm">{detail}</span>
+                          <span className="text-xs ml-auto" style={{ color: theme.gray[400] }}>
+                            {new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </>
           )}
 
