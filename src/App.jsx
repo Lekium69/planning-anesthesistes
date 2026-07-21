@@ -98,6 +98,18 @@ const getShiftLabel = (shift) => {
   return labels[shift] || shift;
 };
 
+// Initiales praticien à partir du nom complet (prénom + NOM ; ex: "Mehdi EL KAMEL" -> "MEK")
+const getInitiales = (name) => {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  // Première lettre du prénom + première lettre de chaque mot du nom de famille
+  const prenomInitiale = parts[0][0];
+  const nomInitiales = parts.slice(1).map(p => p[0]).join('');
+  return (prenomInitiale + nomInitiales).toUpperCase();
+};
+
 const ShiftIcon = ({ shift, className = "w-4 h-4" }) => {
   if (shift?.includes('astreinte')) return <Moon className={className} />;
   if (shift === 'bloc') return <Building2 className={className} />;
@@ -2924,7 +2936,7 @@ const AnesthesistScheduler = () => {
                             </div>
                             {getAssigned(d, shift).map(a => (
                               <div key={a.id} className="text-xs px-2 py-1 rounded text-white mb-1" style={{ backgroundColor: a.color }}>
-                                {a.isRemplacant ? `🔄 ${a.name.split(' ')[0]}` : (a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1])}
+                                {a.isRemplacant ? `🔄 ${getInitiales(a.name)}` : getInitiales(a.name)}
                               </div>
                             ))}
                           </div>
@@ -2938,25 +2950,51 @@ const AnesthesistScheduler = () => {
               {/* Vue Mois */}
               {viewMode === 'month' && (
                 <div className="bg-white rounded-2xl border overflow-hidden">
-                  <div className="grid grid-cols-7 border-b bg-gray-50">
+                  <div className="grid grid-cols-[36px_repeat(7,1fr)] border-b bg-gray-50">
+                    <div className="p-2 text-center text-xs font-medium border-r" style={{ color: theme.gray[400] }}>Sem</div>
                     {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(d => (
                       <div key={d} className="p-2 text-center text-xs font-medium border-r last:border-r-0" style={{ color: theme.gray[600] }}>{d}</div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-7">
+                  <div className="grid grid-cols-[36px_repeat(7,1fr)]">
                     {getDaysInMonth(currentMonth).map((d, i) => {
-                      if (!d) return <div key={i} className="p-2 border-r border-b min-h-[80px] bg-gray-50" />;
+                      const cells = [];
+                      // Début de rangée : cellule numéro de semaine
+                      if (i % 7 === 0) {
+                        const week = getDaysInMonth(currentMonth).slice(i, i + 7).find(x => x);
+                        cells.push(
+                          <div key={`w-${i}`} className="flex items-start justify-center pt-1 border-r border-b bg-gray-50 text-xs font-semibold" style={{ color: theme.gray[400] }}>
+                            {week ? `S${getWeekNumber(week)}` : ''}
+                          </div>
+                        );
+                      }
+                      if (!d) {
+                        cells.push(<div key={i} className="p-2 border-r border-b min-h-[80px] bg-gray-50" />);
+                        return cells;
+                      }
                       const isToday = d.toDateString() === new Date().toDateString();
-                      return (
+                      cells.push(
                         <div key={i} className={`p-1 border-r border-b min-h-[80px] ${isWeekend(d) ? 'bg-gray-50' : isHoliday(d) ? 'bg-amber-50' : ''}`}>
                           <div className={`text-xs font-medium mb-1 ${isToday ? 'bg-blue-600 text-white w-5 h-5 rounded-full flex items-center justify-center' : ''}`}>{d.getDate()}</div>
-                          {getShiftsForDay(d).map(shift => getAssigned(d, shift).slice(0, 2).map(a => (
-                            <div key={`${shift}-${a.id}`} className="text-xs px-1 py-0.5 rounded text-white mb-0.5 truncate" style={{ backgroundColor: a.color }}>
-                              {a.isRemplacant ? '🔄' : ''}{a.name.split(' ')[1]?.substring(0, 4) || a.name.substring(0, 4)}
-                            </div>
-                          )))}
+                          {getShiftsForDay(d).map(shift => {
+                            const assigned = getAssigned(d, shift);
+                            if (assigned.length === 0) return null;
+                            return (
+                              <div key={shift} className="flex items-center gap-0.5 mb-0.5">
+                                <ShiftIcon shift={shift} className="w-2.5 h-2.5 flex-shrink-0" style={{ color: theme.gray[400] }} />
+                                <div className="flex flex-wrap gap-0.5">
+                                  {assigned.map(a => (
+                                    <span key={`${shift}-${a.id}`} className="text-xs px-1 py-0.5 rounded text-white font-semibold" style={{ backgroundColor: a.color }} title={`${getShiftLabel(shift)} — ${a.name}`}>
+                                      {a.isRemplacant ? '🔄' : ''}{getInitiales(a.name)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       );
+                      return cells;
                     })}
                   </div>
                 </div>
@@ -3465,13 +3503,13 @@ const AnesthesistScheduler = () => {
                                 >
                                   {a.isRemplacant ? (
                                     <>
-                                      🔄 {a.name.split(' ')[1] || a.name.split(' ')[0]}
+                                      🔄 {getInitiales(a.name)}
                                       {a.titulaireRemplace && (
-                                        <span className="opacity-75"> → {a.titulaireRemplace.split(' ')[1] === 'EL' ? 'EL K.' : a.titulaireRemplace.split(' ')[1]?.substring(0, 4)}</span>
+                                        <span className="opacity-75"> → {getInitiales(a.titulaireRemplace)}</span>
                                       )}
                                     </>
                                   ) : (
-                                    <>Dr {a.name.split(' ')[1] === 'EL' ? 'EL KAMEL' : a.name.split(' ')[1]}</>
+                                    <>{getInitiales(a.name)}</>
                                   )}
                                 </div>
                               ))}
@@ -3544,30 +3582,54 @@ const AnesthesistScheduler = () => {
               {/* Vue Mois */}
               {viewMode === 'month' && (
                 <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-                  <div className="grid grid-cols-7 border-b">
+                  <div className="grid grid-cols-[36px_repeat(7,1fr)] border-b">
+                    <div className="p-2 text-center text-xs font-semibold border-r" style={{ color: theme.gray[400] }}>Sem</div>
                     {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(day => (
                       <div key={day} className="p-2 text-center text-xs font-semibold border-r last:border-r-0" style={{ color: theme.gray[500] }}>{day}</div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-7">
+                  <div className="grid grid-cols-[36px_repeat(7,1fr)]">
                     {getDaysInMonth(currentMonth).map((d, i) => {
-                      if (!d) return <div key={`empty-${i}`} className="p-2 min-h-[80px] border-r border-b last:border-r-0 bg-gray-50" />;
+                      const cells = [];
+                      if (i % 7 === 0) {
+                        const wk = getDaysInMonth(currentMonth).slice(i, i + 7).find(x => x);
+                        cells.push(
+                          <div key={`w-${i}`} className="flex items-start justify-center pt-2 border-r border-b bg-gray-50 text-xs font-semibold" style={{ color: theme.gray[400] }}>
+                            {wk ? `S${getWeekNumber(wk)}` : ''}
+                          </div>
+                        );
+                      }
+                      if (!d) {
+                        cells.push(<div key={`empty-${i}`} className="p-2 min-h-[80px] border-r border-b last:border-r-0 bg-gray-50" />);
+                        return cells;
+                      }
                       const isToday = d.toDateString() === new Date().toDateString();
                       const isWE = isWeekend(d);
                       const isHol = isHoliday(d);
                       const shifts = getShiftsForDay(d);
-                      return (
+                      cells.push(
                         <div key={formatDateKey(d)} className={`p-2 min-h-[80px] border-r border-b last:border-r-0 ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''}`}>
                           <p className={`text-sm font-bold mb-1 ${isToday ? 'text-blue-600' : ''}`}>{d.getDate()}</p>
                           {isHol && <div className="text-xs mb-1"><Star className="w-3 h-3 inline" style={{ color: theme.warning }} /></div>}
-                          {shifts.map(shift => getAssigned(d, shift).slice(0, 2).map(a => (
-                            <div key={`${shift}-${a.id}`} className="text-xs px-1 py-0.5 rounded text-white mb-0.5 truncate" style={{ backgroundColor: a.color, fontSize: '9px' }}>
-                              <ShiftIcon shift={shift} className="w-2 h-2 inline mr-0.5" />
-                              {a.name.split(' ')[1]?.substring(0, 3)}
-                            </div>
-                          )))}
+                          {shifts.map(shift => {
+                            const assigned = getAssigned(d, shift);
+                            if (assigned.length === 0) return null;
+                            return (
+                              <div key={shift} className="flex items-center gap-0.5 mb-0.5">
+                                <ShiftIcon shift={shift} className="w-2.5 h-2.5 flex-shrink-0" style={{ color: theme.gray[400] }} />
+                                <div className="flex flex-wrap gap-0.5">
+                                  {assigned.map(a => (
+                                    <span key={`${shift}-${a.id}`} className="px-1 py-0.5 rounded text-white font-semibold" style={{ backgroundColor: a.color, fontSize: '9px' }} title={`${getShiftLabel(shift)} — ${a.name}`}>
+                                      {a.isRemplacant ? '🔄' : ''}{getInitiales(a.name)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       );
+                      return cells;
                     })}
                   </div>
                 </div>
