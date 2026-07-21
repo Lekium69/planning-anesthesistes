@@ -1108,6 +1108,8 @@ const AnesthesistScheduler = () => {
   const [swapRequests, setSwapRequests] = useState([]);
   const [exchangeBoard, setExchangeBoard] = useState([]);
   const [unavailabilities, setUnavailabilities] = useState([]);
+  // Filtre "à partir du" pour la vue consolidée des indisponibilités (admin)
+  const [unavailFrom, setUnavailFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [emailPreferences, setEmailPreferences] = useState({});
   
   // Notifications email
@@ -4104,12 +4106,28 @@ const AnesthesistScheduler = () => {
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const form = e.target;
+                  const ds = form.date_start.value;
+                  const de = form.date_end.value;
+                  // Validation : la date de fin ne peut pas précéder la date de début
+                  if (de < ds) {
+                    showToast('La date de fin doit être postérieure ou égale à la date de début', 'error');
+                    return;
+                  }
+                  // Validation : éviter les doublons/chevauchements pour le même praticien
+                  const chevauche = unavailabilities.some(u =>
+                    u.anesthesist_id === currentUser.id && ds <= u.date_end && de >= u.date_start
+                  );
+                  if (chevauche) {
+                    showToast('Cette période chevauche une indisponibilité déjà déclarée', 'error');
+                    return;
+                  }
                   await addUnavailability({
                     anesthesist_id: currentUser.id,
-                    date_start: form.date_start.value,
-                    date_end: form.date_end.value,
+                    date_start: ds,
+                    date_end: de,
                     reason: form.reason.value
                   });
+                  showToast('Indisponibilité enregistrée', 'success');
                   form.reset();
                 }} className="flex gap-4 items-end flex-wrap">
                   <div>
@@ -4132,7 +4150,8 @@ const AnesthesistScheduler = () => {
                 {unavailabilities.filter(u => u.anesthesist_id === currentUser?.id).length === 0 ? (
                   <p style={{ color: theme.gray[500] }}>Aucune indisponibilité déclarée</p>
                 ) : (
-                  unavailabilities.filter(u => u.anesthesist_id === currentUser?.id).map(u => (
+                  [...unavailabilities].filter(u => u.anesthesist_id === currentUser?.id)
+                    .sort((a, b) => a.date_start.localeCompare(b.date_start)).map(u => (
                     <div key={u.id} className="p-4 rounded-xl border border-gray-200 mb-3 flex items-center justify-between">
                       <div>
                         <p className="font-medium">{new Date(u.date_start).toLocaleDateString('fr-FR')} → {new Date(u.date_end).toLocaleDateString('fr-FR')}</p>
@@ -4143,6 +4162,69 @@ const AnesthesistScheduler = () => {
                   ))
                 )}
               </div>
+
+              {/* Vue consolidée équipe - admin uniquement */}
+              {isAdmin && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
+                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <h3 className="font-bold">Indisponibilités de l'équipe</h3>
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm" style={{ color: theme.gray[500] }}>À partir du</label>
+                      <input
+                        type="date"
+                        value={unavailFrom}
+                        onChange={(e) => setUnavailFrom(e.target.value)}
+                        className="px-3 py-1.5 border rounded-xl text-sm"
+                      />
+                    </div>
+                  </div>
+                  {(() => {
+                    const rows = [...unavailabilities]
+                      .filter(u => !unavailFrom || u.date_end >= unavailFrom)
+                      .sort((a, b) => a.date_start.localeCompare(b.date_start));
+                    if (rows.length === 0) {
+                      return <p style={{ color: theme.gray[500] }}>Aucune indisponibilité déclarée sur cette période.</p>;
+                    }
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr style={{ color: theme.gray[500] }}>
+                              <th className="text-left py-2 px-2 border-b">Praticien</th>
+                              <th className="text-left py-2 px-2 border-b">Du</th>
+                              <th className="text-left py-2 px-2 border-b">Au</th>
+                              <th className="text-left py-2 px-2 border-b">Jours</th>
+                              <th className="text-left py-2 px-2 border-b">Motif</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map(u => {
+                              const a = anesthesists.find(x => x.id === u.anesthesist_id);
+                              const nbJours = Math.round((new Date(u.date_end) - new Date(u.date_start)) / 86400000) + 1;
+                              return (
+                                <tr key={u.id} className="hover:bg-gray-50">
+                                  <td className="py-2 px-2 border-b">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-1.5 py-0.5 rounded text-white text-xs font-semibold" style={{ backgroundColor: a?.color || theme.gray[400] }}>
+                                        {a ? getInitiales(a.name) : '?'}
+                                      </span>
+                                      <span>{a?.name || 'Inconnu'}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-2 border-b">{new Date(u.date_start).toLocaleDateString('fr-FR')}</td>
+                                  <td className="py-2 px-2 border-b">{new Date(u.date_end).toLocaleDateString('fr-FR')}</td>
+                                  <td className="py-2 px-2 border-b">{nbJours}</td>
+                                  <td className="py-2 px-2 border-b" style={{ color: theme.gray[500] }}>{u.reason || '—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           )}
 
