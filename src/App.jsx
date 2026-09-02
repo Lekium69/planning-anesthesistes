@@ -42,9 +42,9 @@ const COULEURS_MEDECINS = {
   4: '#9333ea',  // COMBAZ — violet
   5: '#f59e0b',  // SALLABERRY — ambre
   6: '#0e7490',  // JOURDAN — cyan foncé
-  7: '#475569',  // BELLIER — ardoise (inactif)
+  7: '#db2777',  // BELLIER — rose magenta (inactif, masqué)
   8: '#84cc16',  // EL KAMEL — vert lime
-  16: '#db2777', // LAVOLAINE — rose magenta
+  16: '#475569', // LAVOLAINE — ardoise
 };
 const COULEUR_DEFAUT = '#94a3b8'; // gris pour tout autre compte (secrétariat, direction, futurs ajouts)
 
@@ -119,6 +119,10 @@ const ShiftIcon = ({ shift, className = "w-4 h-4" }) => {
 
 // Helper pour identifier un TITULAIRE (pas viewer, pas remplaçant)
 // Un titulaire a un ETP >= 0.5 (50%) et n'est pas un compte générique
+// Praticiens ayant quitté l'équipe : masqués de l'interface (filtres, stats,
+// listes de sélection) mais leurs créneaux passés restent visibles dans le planning.
+const MEDECINS_INACTIFS = new Set([7]); // 7 = Marc BELLIER (parti)
+
 const isTitulaire = (anesthesist) => {
   if (!anesthesist) return false;
   if (anesthesist.role === 'viewer') return false;
@@ -127,6 +131,12 @@ const isTitulaire = (anesthesist) => {
   if (anesthesist.name?.toLowerCase().includes('remplaçant')) return false;
   if (anesthesist.name?.toLowerCase().includes('remplacant')) return false;
   return true;
+};
+
+// Titulaire ET encore en poste : à utiliser pour tout affichage courant
+const isActif = (anesthesist) => {
+  if (!isTitulaire(anesthesist)) return false;
+  return !MEDECINS_INACTIFS.has(anesthesist.id);
 };
 
 // ============================================
@@ -692,7 +702,7 @@ const RecapView = ({ anesthesists, schedule, remplacements, remplacants, iades, 
     astreinte_ferie: { bg: '#fce7f3', text: '#9d174d', label: 'F' },
   };
 
-  const titulaires = anesthesists.filter(a => isTitulaire(a));
+  const titulaires = anesthesists.filter(a => isActif(a));
 
   const today = formatDateKey(new Date());
 
@@ -1284,7 +1294,7 @@ const AnesthesistScheduler = () => {
 
         // Initialiser les filtres (visiteurs et connectés)
         if (selectedFilters.size === 0 && !filtersInitialized.current) {
-          const titulaires = anesthWithColors.filter(a => isTitulaire(a));
+          const titulaires = anesthWithColors.filter(a => isActif(a));
           setSelectedFilters(new Set([...titulaires.map(a => a.id), 'remplacants']));
           filtersInitialized.current = true;
         }
@@ -2563,7 +2573,7 @@ const AnesthesistScheduler = () => {
   // ============================================
   const calculateFullStats = (startDate = null, endDate = null) => {
     // Stats pour les titulaires
-    const titulairesStats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
+    const titulairesStats = anesthesists.filter(a => isActif(a)).map(a => ({
       ...a,
       bloc: 0,
       consultation: 0,
@@ -2743,7 +2753,7 @@ const AnesthesistScheduler = () => {
   // STATS
   // ============================================
   const calculateStats = () => {
-    const stats = anesthesists.filter(a => isTitulaire(a)).map(a => ({
+    const stats = anesthesists.filter(a => isActif(a)).map(a => ({
       ...a,
       bloc: 0,
       consultation: 0,
@@ -2810,7 +2820,8 @@ const AnesthesistScheduler = () => {
     return entries.map(entry => {
       if (entry.type === 'titulaire') {
         const anesth = anesthesists.find(a => a.id === entry.id);
-        if (anesth && selectedFilters.has(anesth.id)) {
+        // Les praticiens partis n'ont plus de filtre : on affiche toujours leur historique
+        if (anesth && (selectedFilters.has(anesth.id) || MEDECINS_INACTIFS.has(anesth.id))) {
           return { ...anesth, isRemplacant: false };
         }
       } else if (entry.type === 'remplacant') {
@@ -2913,7 +2924,7 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border p-4 mb-6">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium" style={{ color: theme.gray[600] }}>Filtrer :</span>
-                  {anesthesists.filter(a => isTitulaire(a)).map(a => (
+                  {anesthesists.filter(a => isActif(a)).map(a => (
                     <button key={a.id} onClick={() => { const f = new Set(selectedFilters); f.has(a.id) ? f.delete(a.id) : f.add(a.id); setSelectedFilters(f); }}
                       className={`px-3 py-1.5 rounded-full text-xs font-medium border-2 ${selectedFilters.has(a.id) ? 'text-white' : ''}`}
                       style={selectedFilters.has(a.id) ? { backgroundColor: a.color, borderColor: a.color } : { borderColor: theme.gray[200], color: theme.gray[400] }}>
@@ -2922,7 +2933,7 @@ const AnesthesistScheduler = () => {
                   ))}
                   <button onClick={() => { const f = new Set(selectedFilters); f.has('remplacants') ? f.delete('remplacants') : f.add('remplacants'); setSelectedFilters(f); }}
                     className={`px-3 py-1.5 rounded-full text-xs font-medium border-2 ${selectedFilters.has('remplacants') ? 'bg-gray-600 text-white border-gray-600' : 'border-gray-200 text-gray-400'}`}>🔄 Remplaçants</button>
-                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isTitulaire(a)).map(a => a.id), 'remplacants']))} className="text-xs px-2 py-1 rounded-lg bg-gray-100">Tous</button>
+                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isActif(a)).map(a => a.id), 'remplacants']))} className="text-xs px-2 py-1 rounded-lg bg-gray-100">Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-2 py-1 rounded-lg bg-gray-100">Aucun</button>
                 </div>
               </div>
@@ -3591,7 +3602,7 @@ const AnesthesistScheduler = () => {
                                 >
                                   <option value="">+ Ajouter</option>
                                   <optgroup label="── Titulaires ──">
-                                    {anesthesists.filter(a => isTitulaire(a) && !getAssigned(d, shift).some(assigned => !assigned.isRemplacant && assigned.id === a.id)).map(a => (
+                                    {anesthesists.filter(a => isActif(a) && !getAssigned(d, shift).some(assigned => !assigned.isRemplacant && assigned.id === a.id)).map(a => (
                                       <option key={a.id} value={a.id}>{a.name}</option>
                                     ))}
                                   </optgroup>
@@ -3712,11 +3723,11 @@ const AnesthesistScheduler = () => {
               <div className="bg-white rounded-2xl border border-gray-200 p-4 mt-6">
                 <div className="flex items-center gap-4 flex-wrap">
                   <span className="font-medium text-sm" style={{ color: theme.gray[700] }}><Users className="w-4 h-4 inline mr-1" />Filtrer :</span>
-                  {anesthesists.filter(a => isTitulaire(a)).map(a => (
+                  {anesthesists.filter(a => isActif(a)).map(a => (
                     <button
                       key={a.id}
                       onClick={() => {
-                        const titulaires = anesthesists.filter(x => isTitulaire(x));
+                        const titulaires = anesthesists.filter(x => isActif(x));
                         const allSelected = selectedFilters.size === titulaires.length + 1;
                         if (allSelected) {
                           setSelectedFilters(new Set([a.id]));
@@ -3756,7 +3767,7 @@ const AnesthesistScheduler = () => {
                   >
                     Remplaçants
                   </button>
-                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isTitulaire(a)).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
+                  <button onClick={() => setSelectedFilters(new Set([...anesthesists.filter(a => isActif(a)).map(a => a.id), 'remplacants']))} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Tous</button>
                   <button onClick={() => setSelectedFilters(new Set())} className="text-xs px-3 py-1 rounded-lg" style={{ backgroundColor: theme.gray[100] }}>Aucun</button>
 
                   {/* Séparateur et toggle IADES */}
@@ -6250,7 +6261,7 @@ const AnesthesistScheduler = () => {
                 <strong>{remplacants.find(r => r.id === replacementModal.remplacantId)?.name}</strong> remplace qui pour le <strong>{getShiftLabel(replacementModal.shift)}</strong> du <strong>{new Date(replacementModal.date).toLocaleDateString('fr-FR')}</strong> ?
               </p>
               <div className="space-y-2">
-                {anesthesists.filter(a => isTitulaire(a)).map(a => (
+                {anesthesists.filter(a => isActif(a)).map(a => (
                   <button
                     key={a.id}
                     onClick={() => addRemplacement(replacementModal.date, replacementModal.shift, replacementModal.remplacantId, a.id)}
