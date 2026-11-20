@@ -123,6 +123,20 @@ const ShiftIcon = ({ shift, className = "w-4 h-4" }) => {
 // listes de sélection) mais leurs créneaux passés restent visibles dans le planning.
 const MEDECINS_INACTIFS = new Set([7]); // 7 = Marc BELLIER (parti)
 
+// Historique des fêtes de fin d'année AVANT l'app (saisons 2021/2022 → 2025/2026, jusqu'au 01/01/2026 inclus).
+// Ordre des compteurs : [24 déc., 25 déc., 31 déc., 1er janv.] — clé = id anesthésiste.
+// Les données de l'app ne sont comptées qu'à partir de la saison 2026/2027 (24/12/2026).
+const HISTORIQUE_FETES = {
+  3: [1, 1, 2, 1], // OC
+  5: [0, 0, 1, 1], // SS
+  6: [1, 1, 0, 0], // RJ
+  8: [0, 2, 0, 0], // MEK
+  4: [1, 1, 1, 0], // SC
+  1: [0, 0, 0, 1], // TF
+  2: [0, 0, 1, 0], // ET
+};
+const FETES_PREMIERE_SAISON_APP = 2026;
+
 const isTitulaire = (anesthesist) => {
   if (!anesthesist) return false;
   if (anesthesist.role === 'viewer') return false;
@@ -1159,9 +1173,10 @@ const AnesthesistScheduler = () => {
   const [editingRemplacant, setEditingRemplacant] = useState(null);
   const [editingAnesth, setEditingAnesth] = useState(null);
   const [replacementModal, setReplacementModal] = useState(null); // {date, shift, remplacant}
+  const [dayEditDate, setDayEditDate] = useState(null); // Date du jour en édition (vue Mois)
 
   // UI
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentView, setCurrentView] = useState('planning');
   const [viewMode, setViewMode] = useState('week');
   const [currentWeekStart, setCurrentWeekStart] = useState(getMonday(new Date()));
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -1816,6 +1831,12 @@ const AnesthesistScheduler = () => {
   // Supprimer un remplaçant du planning
   const removeRemplacant = async (scheduleId) => {
     if (!canEditPlanning) return;
+    // Supprimer aussi l'entrée d'historique, sinon l'ancien titulaire « colle » au prochain ajout
+    const { data: row } = await supabase.from('schedule').select('date, shift, remplacant_name').eq('id', scheduleId).maybeSingle();
+    if (row?.remplacant_name) {
+      await supabase.from('remplacements').delete()
+        .eq('date', row.date).eq('shift', row.shift).eq('remplacant_name', row.remplacant_name);
+    }
     await supabase.from('schedule').delete().eq('id', scheduleId);
     await loadData();
   };
@@ -1964,8 +1985,13 @@ const AnesthesistScheduler = () => {
 
   const deleteAnesthesist = async (id) => {
     if (!canManageAnesthesists) return;
-    askConfirm('Supprimer ce médecin ? (Les données de planning seront conservées)', async () => {
-      await supabase.from('anesthesists').delete().eq('id', id);
+    askConfirm('Supprimer ce médecin ? Attention : tout son historique de planning sera aussi supprimé. Pour un médecin parti, préférez le masquer (liste MEDECINS_INACTIFS).', async () => {
+      const { error } = await supabase.from('anesthesists').delete().eq('id', id);
+      if (error) {
+        console.error('Erreur suppression médecin:', error);
+        showToast('Suppression impossible : ' + error.message, 'error');
+        return;
+      }
       await loadData();
       showToast('Médecin supprimé', 'success');
     });
@@ -1983,13 +2009,18 @@ const AnesthesistScheduler = () => {
     // Vérifier si ce remplacement existe déjà (éviter doublons)
     const { data: existing } = await supabase
       .from('remplacements')
-      .select('id')
+      .select('id, titulaire_id')
       .eq('date', date)
       .eq('shift', shift)
       .eq('remplacant_name', remplacant.name)
-      .single();
+      .maybeSingle();
 
-    if (!existing) {
+    if (existing) {
+      // Mettre à jour le titulaire remplacé si l'utilisateur a choisi quelqu'un d'autre
+      if (existing.titulaire_id !== titulaireId) {
+        await supabase.from('remplacements').update({ titulaire_id: titulaireId }).eq('id', existing.id);
+      }
+    } else {
       // 1. Enregistrer dans l'historique des remplacements
       await supabase.from('remplacements').insert({
         date,
@@ -2007,7 +2038,7 @@ const AnesthesistScheduler = () => {
       .eq('date', date)
       .eq('shift', shift)
       .eq('remplacant_name', remplacant.name)
-      .single();
+      .maybeSingle();
 
     if (!existingSchedule) {
       // Ajouter le remplaçant au planning
@@ -3187,12 +3218,10 @@ const AnesthesistScheduler = () => {
 
         <nav className="flex-1 p-4">
           {[
-            { id: 'dashboard', icon: Home, label: 'Tableau de bord', show: canRequestSwap }, // Admin et anesthésistes
             { id: 'planning', icon: Calendar, label: 'Planning', show: true }, // Tout le monde
             { id: 'stats', icon: BarChart3, label: 'Statistiques', show: !isIade }, // Pas les IADEs
             { id: 'incoherences', icon: AlertTriangle, label: 'Incohérences', show: canEditPlanning, badge: incoherenceCount }, // Admin seulement
             { id: 'remplacants', icon: UserPlus, label: 'Remplaçants', show: !isIade && !isViewer }, // Admin et anesthésistes
-            { id: 'exchange', icon: MessageSquare, label: 'Bourse aux échanges', show: canRequestSwap }, // Admin et anesthésistes
             { id: 'unavailabilities', icon: CalendarOff, label: 'Indisponibilités', show: canSetUnavailability }, // Admin et anesthésistes
             { id: 'admin', icon: Shield, label: 'Administration', show: canManageAnesthesists || canManageIades }, // Admin ou Admin IADE
             { id: 'settings', icon: Settings, label: 'Paramètres', show: canRequestSwap }, // Admin et anesthésistes
@@ -3212,7 +3241,8 @@ const AnesthesistScheduler = () => {
             </button>
           ))}
 
-          {/* Section IADES avec sous-menu */}
+          {/* Section IADES avec sous-menu — visible uniquement pour les IADE et l'admin IADE */}
+          {(isIade || isIadeAdmin) && (
           <div className="mt-3 pt-3 border-t border-white/20">
             <button
               onClick={() => setIadesMenuOpen(!iadesMenuOpen)}
@@ -3295,6 +3325,7 @@ const AnesthesistScheduler = () => {
               </div>
             )}
           </div>
+          )}
         </nav>
 
         <div className="p-4 border-t border-white/10">
@@ -3675,7 +3706,12 @@ const AnesthesistScheduler = () => {
                       const isHol = isHoliday(d);
                       const shifts = getShiftsForDay(d);
                       cells.push(
-                        <div key={formatDateKey(d)} className={`p-2 min-h-[80px] border-r border-b last:border-r-0 ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''}`}>
+                        <div
+                          key={formatDateKey(d)}
+                          onClick={() => { if (canEditPlanning) setDayEditDate(d); }}
+                          className={`p-2 min-h-[80px] border-r border-b last:border-r-0 ${isWE ? 'bg-gray-50' : isHol ? 'bg-amber-50' : ''} ${canEditPlanning ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
+                          title={canEditPlanning ? 'Cliquer pour modifier ce jour' : undefined}
+                        >
                           <p className={`text-sm font-bold mb-1 ${isToday ? 'text-blue-600' : ''}`}>{d.getDate()}</p>
                           {isHol && <div className="text-xs mb-1"><Star className="w-3 h-3 inline" style={{ color: theme.warning }} /></div>}
                           {shifts.map(shift => {
@@ -3881,6 +3917,159 @@ const AnesthesistScheduler = () => {
                   </table>
                 </div>
               </div>
+
+              {/* RÉCAP FÊTES DE FIN D'ANNÉE (24, 25, 31 déc. et 1er janv.) */}
+              {(() => {
+                const FETES = [
+                  { md: '12-24', label: '24 déc.', offset: 0 },
+                  { md: '12-25', label: '25 déc.', offset: 0 },
+                  { md: '12-31', label: '31 déc.', offset: 0 },
+                  { md: '01-01', label: '1er janv.', offset: 1 },
+                ];
+                const SHIFT_PRIORITY = ['astreinte_ferie', 'astreinte_we', 'astreinte'];
+
+                // Qui tient l'astreinte ce jour-là ?
+                const getHolder = (dateKey) => {
+                  const day = schedule[dateKey];
+                  if (!day) return null;
+                  for (const sh of SHIFT_PRIORITY) {
+                    const entry = (day[sh] || [])[0];
+                    if (!entry) continue;
+                    if (entry.type === 'titulaire') {
+                      const a = anesthesists.find(x => x.id === entry.id);
+                      return a ? { id: a.id, name: a.name, color: a.color, isRemplacant: false } : null;
+                    }
+                    const repl = remplacements.find(r => r.date === dateKey && r.shift === sh && r.remplacant_name === entry.name);
+                    const tit = repl ? anesthesists.find(t => t.id === repl.titulaire_id) : null;
+                    return { name: entry.name, color: theme.gray[400], isRemplacant: true, titulaire: tit };
+                  }
+                  return null;
+                };
+
+                // Saisons disponibles (année du 24/12)
+                const years = Object.keys(schedule).map(k => {
+                  const y = parseInt(k.substring(0, 4));
+                  return k.substring(5) === '01-01' ? y - 1 : y;
+                });
+                if (years.length === 0) return null;
+                const minY = Math.max(FETES_PREMIERE_SAISON_APP, Math.min(...years));
+                const maxY = Math.max(...years);
+                const seasons = [];
+                for (let y = maxY; y >= minY; y--) {
+                  const cells = FETES.map(f => {
+                    const key = `${y + f.offset}-${f.md}`;
+                    return { key, holder: getHolder(key) };
+                  });
+                  if (cells.some(c => c.holder)) seasons.push({ year: y, cells });
+                }
+
+                // Totaux par titulaire = historique (avant l'app) + saisons de l'app
+                const totals = {};
+                Object.entries(HISTORIQUE_FETES).forEach(([id, counts]) => {
+                  const a = anesthesists.find(x => x.id === parseInt(id));
+                  if (!a) return;
+                  totals[a.id] = { name: a.name, color: a.color, counts: [...counts], total: counts.reduce((x, y) => x + y, 0), histo: counts.reduce((x, y) => x + y, 0) };
+                });
+                seasons.forEach(se => se.cells.forEach((c, i) => {
+                  if (c.holder && !c.holder.isRemplacant) {
+                    if (!totals[c.holder.id]) totals[c.holder.id] = { name: c.holder.name, color: c.holder.color, counts: [0, 0, 0, 0], total: 0, histo: 0 };
+                    totals[c.holder.id].counts[i]++;
+                    totals[c.holder.id].total++;
+                  }
+                }));
+                anesthesists.filter(a => isActif(a) && isTitulaire(a) && !totals[a.id]).forEach(a => {
+                  totals[a.id] = { name: a.name, color: a.color, counts: [0, 0, 0, 0], total: 0, histo: 0 };
+                });
+                const totalRows = Object.values(totals).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#b91c1c' }}>
+                        <Star className="w-5 h-5 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold" style={{ color: theme.gray[800] }}>Fêtes de fin d'année</h3>
+                        <p className="text-sm" style={{ color: theme.gray[500] }}>Astreinte des 24, 25, 31 décembre et 1er janvier — depuis 2021 (hors filtre de période)</p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto mb-6">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                            <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Fêtes</th>
+                            {FETES.map(f => (
+                              <th key={f.md} className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>{f.label}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {seasons.map(se => (
+                            <tr key={se.year} className="border-b hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-medium">{se.year} / {se.year + 1}</td>
+                              {se.cells.map(c => (
+                                <td key={c.key} className="px-4 py-3 text-center">
+                                  {c.holder ? (
+                                    <span
+                                      className="inline-block text-xs px-2 py-1 rounded-lg text-white"
+                                      style={{ backgroundColor: c.holder.color }}
+                                      title={c.holder.isRemplacant && c.holder.titulaire ? `${c.holder.name} remplace ${c.holder.titulaire.name}` : c.holder.name}
+                                    >
+                                      {c.holder.isRemplacant ? '🔄 ' : ''}{getInitiales(c.holder.name)}
+                                      {c.holder.isRemplacant && c.holder.titulaire && <span className="opacity-75"> → {getInitiales(c.holder.titulaire.name)}</span>}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs" style={{ color: theme.gray[400] }}>—</span>
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                          <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                            <td className="px-4 py-3 text-sm font-medium" style={{ color: theme.gray[500] }}>2021 → 2025 / 2026</td>
+                            <td colSpan={FETES.length} className="px-4 py-3 text-center text-xs italic" style={{ color: theme.gray[500] }}>
+                              Historique avant l'application — inclus dans les totaux ci-dessous
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b" style={{ backgroundColor: theme.gray[50] }}>
+                            <th className="px-4 py-3 text-left text-sm font-semibold" style={{ color: theme.gray[600] }}>Médecin</th>
+                            {FETES.map(f => (
+                              <th key={f.md} className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>{f.label}</th>
+                            ))}
+                            <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[600] }}>Total</th>
+                            <th className="px-4 py-3 text-center text-sm font-semibold" style={{ color: theme.gray[500] }}>dont avant l'app</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {totalRows.map(t => (
+                            <tr key={t.name} className="border-b hover:bg-gray-50">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }} />
+                                  <span className="font-medium">{t.name}</span>
+                                </div>
+                              </td>
+                              {t.counts.map((n, i) => (
+                                <td key={i} className="px-4 py-3 text-center text-sm" style={{ color: n === 0 ? theme.gray[400] : 'inherit' }}>{n}</td>
+                              ))}
+                              <td className="px-4 py-3 text-center text-sm font-bold">{t.total}</td>
+                              <td className="px-4 py-3 text-center text-sm" style={{ color: theme.gray[500] }}>{t.histo}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* SÉPARATION */}
               <div className="flex items-center gap-4 my-8">
@@ -4367,7 +4556,7 @@ const AnesthesistScheduler = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {anesthesists.filter(a => a.role !== 'viewer').map(a => (
+                        {anesthesists.filter(a => a.role !== 'viewer' && !MEDECINS_INACTIFS.has(a.id)).map(a => (
                           <tr key={a.id} className="border-b hover:bg-gray-50">
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
@@ -6243,6 +6432,86 @@ const AnesthesistScheduler = () => {
               >
                 Enregistrer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ÉDITION D'UN JOUR (depuis la vue Mois) */}
+      {dayEditDate && canEditPlanning && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDayEditDate(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold capitalize">{dayEditDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</h2>
+                {isHoliday(dayEditDate) && <p className="text-sm mt-1" style={{ color: theme.warning }}><Star className="w-3 h-3 inline" /> {getHolidayName(dayEditDate)}</p>}
+              </div>
+              <div className="flex items-center gap-1">
+                <button aria-label="Jour précédent" onClick={() => setDayEditDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronLeft className="w-5 h-5" /></button>
+                <button aria-label="Jour suivant" onClick={() => setDayEditDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; })} className="p-2 rounded-xl hover:bg-gray-100"><ChevronRight className="w-5 h-5" /></button>
+                <button aria-label="Fermer" onClick={() => setDayEditDate(null)} className="p-2 rounded-xl hover:bg-gray-100"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+            <div className="p-6 space-y-5">
+              {getShiftsForDay(dayEditDate).map(shift => {
+                const d = dayEditDate;
+                const assigned = getAssigned(d, shift);
+                return (
+                  <div key={shift}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <ShiftIcon shift={shift} className="w-4 h-4" style={{ color: theme.gray[500] }} />
+                      <span className="text-sm font-semibold" style={{ color: theme.gray[700] }}>{getShiftLabel(shift)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {assigned.length === 0 && <span className="text-xs italic" style={{ color: theme.gray[400] }}>Personne</span>}
+                      {assigned.map(a => (
+                        <button
+                          key={a.id}
+                          onClick={() => a.isRemplacant ? removeRemplacant(a.scheduleId) : toggleAssignment(d, a.id, shift)}
+                          className="text-sm px-3 py-1.5 rounded-lg text-white flex items-center gap-1 hover:opacity-80"
+                          style={{ backgroundColor: a.color }}
+                          title="Cliquer pour retirer"
+                        >
+                          {a.isRemplacant ? '🔄 ' : ''}{a.name}
+                          {a.isRemplacant && a.titulaireRemplace && <span className="opacity-75"> → {getInitiales(a.titulaireRemplace)}</span>}
+                          <X className="w-3.5 h-3.5 ml-1" />
+                        </button>
+                      ))}
+                    </div>
+                    <select
+                      className="w-full text-sm p-2 border rounded-lg"
+                      value=""
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) return;
+                        if (v.startsWith('r_')) {
+                          setReplacementModal({ date: formatDateKey(d), shift, remplacantId: parseInt(v.substring(2)) });
+                        } else {
+                          toggleAssignment(d, parseInt(v), shift);
+                        }
+                        e.target.value = '';
+                      }}
+                    >
+                      <option value="">+ Ajouter</option>
+                      <optgroup label="── Titulaires ──">
+                        {anesthesists.filter(a => isActif(a) && !assigned.some(x => !x.isRemplacant && x.id === a.id)).map(a => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </optgroup>
+                      {remplacants.length > 0 && (
+                        <optgroup label="── Remplaçants ──">
+                          {remplacants.map(r => (
+                            <option key={`r_${r.id}`} value={`r_${r.id}`}>{r.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="p-6 border-t">
+              <button onClick={() => setDayEditDate(null)} className="w-full px-4 py-2 border rounded-xl hover:bg-gray-50">Fermer</button>
             </div>
           </div>
         </div>
